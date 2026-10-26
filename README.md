@@ -68,7 +68,7 @@ pt <- matrix(c(3, 2, 1, 3, 2, 1, 2, 2, 1, 1,
 result <- ancestry_split_dosage(gt, pt)
 result$african    # African ancestry-specific dosages
 result$european   # European ancestry-specific dosages
-result$counts     # Ancestry counts per region
+result$counts     # Per-variant counts of AFR/AFR, EUR/EUR and AFR/EUR samples
 ```
 
 ### Phased split
