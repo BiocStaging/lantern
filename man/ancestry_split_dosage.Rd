@@ -41,9 +41,11 @@ Only used when \code{vcf_path}/\code{msp_path} are supplied.}
 }
 \value{
 List with elements:
-  \item{african}{African ancestry-specific dosage matrix}
+  \item{african}{African ancestry-specific dosage matrix (variants x
+    samples)}
   \item{european}{European ancestry-specific dosage matrix}
-  \item{counts}{List of ancestry counts per region/sample}
+  \item{counts}{List (\code{african}, \code{european}, \code{mixed}) of
+    per-variant counts of samples with ancestry code 3, 1 and 2}
   \item{overlap}{Overlap information}
 }
 \description{
@@ -57,6 +59,15 @@ Memory efficient: single-pass subsetting using index vectors.
   \code{\link{ancestry_split}} (see its "Shrinkage toward 1/2" section).
   The target is the same for every variant, so the direct
   \code{gt_matrix}/\code{pt_matrix} path needs no position information.
+}
+
+\section{Matching variants to regions}{
+ Each variant (row of
+  \code{gt_matrix}) is paired with an ancestry column of \code{pt_matrix}
+  by, in order of preference: identical names; position, when rownames
+  look like \code{"chr:pos"} and colnames like \code{"chr:start-end"}
+  (the first region containing the variant; several variants may share a
+  region); or, when either matrix has no names, position in the matrix.
 }
 
 \examples{

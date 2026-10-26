@@ -1085,3 +1085,73 @@ test_that("ancestry_split_dosage (matrix path) shrinks ambiguous hets toward 1/2
   # unambiguous carrier untouched
   expect_equal(result$african[1, 1], 1, tolerance = 1e-9)
 })
+
+# ============================================================================
+# ancestry_split_dosage() matrix path: variant <-> ancestry pairing
+# (regressions for 0.99.1 fixes)
+# ============================================================================
+
+# The toy VCF/MSP as legacy matrix inputs: diploid genotypes (variants x
+# samples, rownames "chr:pos") and diploid ancestry codes per MSP tract
+# (samples x tracts, colnames "chr:start-end"; 1 = EUR/EUR, 2 = AFR/EUR,
+# 3 = AFR/AFR).
+toy_matrix_inputs <- function() {
+  ext <- system.file("extdata", package = "lantern")
+  common <- suppressMessages(lantern:::.parse_vcf_msp_common(
+    file.path(ext, "toy.vcf.gz"), file.path(ext, "toy.msp.tsv"),
+    chrom = "chr19", verbose = FALSE))
+  gt <- common$gt_hap0_mat + common$gt_hap1_mat
+  rownames(gt) <- paste0(common$variant_info$chrom, ":", common$variant_info$pos)
+  # MSP code 0 = AFR, 1 = EUR -> number of AFR haplotypes + 1
+  pt <- (common$anc_hap0_tract == 0) + (common$anc_hap1_tract == 0) + 1L
+  colnames(pt) <- paste0(common$tract_df$chrom, ":", common$tract_df$spos,
+                         "-", common$tract_df$epos)
+  list(gt = gt, pt = pt)
+}
+
+test_that("ancestry_split_dosage(gt, pt) matches ancestry_split() on the same data", {
+  m <- toy_matrix_inputs()
+  ext <- system.file("extdata", package = "lantern")
+  ref <- ancestry_split(file.path(ext, "toy.vcf.gz"), file.path(ext, "toy.msp.tsv"),
+                        mode = "dosage", chrom = "chr19", verbose = FALSE)
+  # Many variants share each tract: coordinate matching maps every variant
+  # to the tract that contains it.
+  res <- ancestry_split_dosage(m$gt, m$pt, verbose = FALSE)
+  expect_equal(nrow(res$african), nrow(ref$AFR))
+  expect_equal(unname(res$african), unname(ref$AFR), tolerance = 1e-12)
+  expect_equal(unname(res$european), unname(ref$EUR), tolerance = 1e-12)
+  # counts are per variant, like ancestry_split()'s ancestry_counts
+  expect_equal(res$counts$african, unname(ref$ancestry_counts[, "AFR"]))
+  expect_equal(res$counts$european, unname(ref$ancestry_counts[, "EUR"]))
+})
+
+test_that("ancestry_split_dosage pairs exact names regardless of column order", {
+  gt <- matrix(c(1, 0, 2, 1, 1, 0), nrow = 2,
+               dimnames = list(c("v1", "v2"), c("s1", "s2", "s3")))
+  pt <- matrix(c(3, 2, 1, 1, 2, 3), nrow = 3,
+               dimnames = list(c("s1", "s2", "s3"), c("v1", "v2")))
+  a <- ancestry_split_dosage(gt, pt, verbose = FALSE)
+  b <- ancestry_split_dosage(gt, pt[, c("v2", "v1")], verbose = FALSE)
+  expect_identical(a$african, b$african)
+  expect_identical(a$european, b$european)
+  # and each variant uses its own column of pt
+  expect_equal(a$african, split_diploid(gt, t(pt), gla = matrix(.5, 1, 2),
+                                        arm_id = c(0L, 0L))$african)
+})
+
+test_that("ancestry_split_dosage uses the first n entries of unnamed matrices of different sizes", {
+  gt <- matrix(c(2, 1, 0, 1, 2, 1, 1, 1), nrow = 2, ncol = 4)
+  pt <- matrix(c(3, 2, 1, 3, 2, 1), nrow = 3, ncol = 2)
+  expect_warning(res <- ancestry_split_dosage(gt, pt, verbose = FALSE),
+                 "different numbers of samples")
+  expect_equal(dim(res$african), c(2L, 3L))
+  expect_equal(res$overlap$n_samples_kept, 3)
+})
+
+test_that("ancestry_split_dosage errors clearly when variants and regions do not overlap", {
+  gt <- matrix(1, nrow = 2, ncol = 2, dimnames = list(c("a", "b"), c("s1", "s2")))
+  pt <- matrix(1, nrow = 2, ncol = 2, dimnames = list(c("s1", "s2"), c("x", "y")))
+  expect_error(ancestry_split_dosage(gt, pt, verbose = FALSE), "No variant overlap")
+  expect_error(ancestry_split_dosage(vcf_path = "x.vcf", verbose = FALSE),
+               "Supply both `vcf_path` and `msp_path`")
+})

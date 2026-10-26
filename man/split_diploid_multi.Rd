@@ -7,8 +7,8 @@
 split_diploid_multi(
   gt_genotype,
   ancestry,
-  pure_codes,
-  mixed_codes,
+  pure_codes = c(AFR = 3L, EUR = 1L),
+  mixed_codes = data.frame(code = 2L, pop1 = "AFR", pop2 = "EUR"),
   gla = NULL,
   arm_id = NULL
 )
@@ -21,7 +21,9 @@ same dimensions as \code{gt_genotype}.}
 
 \item{pure_codes}{Named integer vector mapping each population label to its
 pure-ancestry diploid code.
-Example: \code{c(AFR = 3L, EUR = 1L, NAT = 4L)}.}
+Example: \code{c(AFR = 3L, EUR = 1L, NAT = 4L)}. The default is the
+two-population coding used by \code{\link{split_diploid}}
+(3 = AFR/AFR, 1 = EUR/EUR).}
 
 \item{mixed_codes}{Data frame with three columns:
 \describe{
@@ -31,7 +33,10 @@ Example: \code{c(AFR = 3L, EUR = 1L, NAT = 4L)}.}
   \item{pop2}{Character name of the second parent population
     (must be a name in \code{pure_codes}).}
 }
-One row per mixed-ancestry diploid type.
+One row per mixed-ancestry diploid type. The default is the
+two-population mixed code 2 = AFR/EUR, so with both defaults
+\code{split_diploid_multi(gt, ancestry)} matches
+\code{split_diploid(gt, ancestry)}.
 Example for 3 populations:
 \code{data.frame(code=c(2L,5L,6L), pop1=c("AFR","AFR","EUR"), pop2=c("EUR","NAT","NAT"))}}
 

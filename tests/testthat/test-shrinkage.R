@@ -30,7 +30,7 @@ test_that("split_diploid with abundant unambiguous evidence ignores GLA (w = 0)"
   gt <- matrix(c(1, 1, 1), nrow = 1, ncol = 3)
   an <- matrix(c(3, 3, 1), nrow = 1, ncol = 3)   # 2 pure-AFR het, 1 pure-EUR het
   gla <- matrix(c(0.1, 0.9), nrow = 1, ncol = 2, dimnames = list("p", c("AFR", "EUR")))
-  result_shrunk   <- split_diploid(gt, an, gla = gla, arm_id = c(0L, 0L, 0L))
+  result_shrunk   <- split_diploid(gt, an, gla = gla, arm_id = 0L)
   result_unshrunk <- split_diploid(gt, an)
   expect_equal(result_shrunk$african, result_unshrunk$african)
   expect_equal(result_shrunk$european, result_unshrunk$european)
@@ -44,7 +44,7 @@ test_that("split_diploid partial-w blends raw ratio and GLA proportionally", {
   gt <- matrix(c(1, 1), nrow = 1, ncol = 2)
   an <- matrix(c(3, 2), nrow = 1, ncol = 2)
   gla <- matrix(c(0.2, 0.8), nrow = 1, ncol = 2, dimnames = list("p", c("AFR", "EUR")))
-  result <- split_diploid(gt, an, gla = gla, arm_id = c(0L, 0L))
+  result <- split_diploid(gt, an, gla = gla, arm_id = 0L)
   w <- 0.5
   expect_equal(result$african[1, 2], (1 - w) * 1.0 + w * 0.2, tolerance = 1e-8)
   expect_equal(result$european[1, 2], (1 - w) * 0.0 + w * 0.8, tolerance = 1e-8)
@@ -59,7 +59,7 @@ test_that("split_diploid partial-w gives hom-alt carriers 2x the confidence weig
   gt <- matrix(c(2, 1), nrow = 1, ncol = 2)
   an <- matrix(c(3, 2), nrow = 1, ncol = 2)
   gla <- matrix(c(0.2, 0.8), nrow = 1, ncol = 2, dimnames = list("p", c("AFR", "EUR")))
-  result <- split_diploid(gt, an, gla = gla, arm_id = c(0L, 0L))
+  result <- split_diploid(gt, an, gla = gla, arm_id = 0L)
   w <- 1 / 3
   expect_equal(result$african[1, 2], (1 - w) * 1.0 + w * 0.2, tolerance = 1e-8)
   expect_equal(result$european[1, 2], (1 - w) * 0.0 + w * 0.8, tolerance = 1e-8)
