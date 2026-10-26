@@ -1,67 +1,8 @@
 # ============================================================================
-# GLA (global local ancestry) shrinkage: .assign_arm, .compute_arm_gla, and
-# the w-weighted blend in split_diploid()/split_diploid_multi()
+# Shrinkage of ambiguous splits in split_diploid()/split_diploid_multi():
+# the w-weighted blend of the raw ratio toward a target (1/2 in
+# ancestry_split(); arbitrary per-arm targets via `gla`/`arm_id`)
 # ============================================================================
-
-test_that(".assign_arm classifies p/q arms using the hg38 centromere table", {
-  # chr19 centromere (inst/scripts/centromeres_hg38.R): p_end=24498980, q_start=27190874
-  expect_equal(.assign_arm("chr19", 100), 0L)
-  expect_equal(.assign_arm("19", 24498979), 0L)
-  expect_equal(.assign_arm("chr19", 24498980), 1L)   # inside gap -> q tie-break
-  expect_equal(.assign_arm("chr19", 30000000), 1L)
-  expect_equal(.assign_arm(c("chr19", "chr19"), c(100, 30000000)), c(0L, 1L))
-})
-
-test_that(".assign_arm errors on non-autosomal chromosomes", {
-  expect_error(.assign_arm("chrX", 100), "autosomal")
-  expect_error(.assign_arm("chr23", 100), "autosomal")
-})
-
-test_that(".compute_arm_gla computes length-weighted per-arm proportions", {
-  # 2 samples x 2 tracts, both on chr19's p-arm (well below its ~24.5Mb centromere)
-  # diploid codes: 1=AFR, 2=EUR, 3=mixed(AFR/EUR)
-  tract_df <- data.frame(chrom = c("chr19", "chr19"),
-                          spos  = c(0, 1000000),
-                          epos  = c(1000000, 5000000))
-  anc_diploid_tract <- matrix(c(1, 3,
-                                 3, 2),
-                               nrow = 2, ncol = 2, byrow = TRUE)
-  pure_codes_named <- c(AFR = 1L, EUR = 2L)
-  mixed_codes_df <- data.frame(code = 3L, pop1 = "AFR", pop2 = "EUR",
-                                stringsAsFactors = FALSE)
-
-  gla <- .compute_arm_gla(tract_df, anc_diploid_tract, pure_codes_named, mixed_codes_df)
-
-  expect_named(gla, "chr19")
-  mat <- gla$chr19
-  expect_equal(rownames(mat), c("p", "q"))
-  expect_equal(colnames(mat), c("AFR", "EUR"))
-  # T_AFR=1e6, T_EUR=4e6, T_mixed=5e6, total=1e7
-  # GLA_AFR = (2*1e6+5e6)/2e7 = 0.35 ; GLA_EUR = (2*4e6+5e6)/2e7 = 0.65
-  expect_equal(unname(mat["p", "AFR"]), 0.35, tolerance = 1e-8)
-  expect_equal(unname(mat["p", "EUR"]), 0.65, tolerance = 1e-8)
-  # No q-arm tracts at all -> falls back to whole-chromosome GLA, which here
-  # equals the p-arm-only computation exactly (all tracts are on the p-arm)
-  expect_equal(mat["q", ], mat["p", ])
-})
-
-test_that(".compute_arm_gla computes p/q arms independently when tracts span both", {
-  tract_df <- data.frame(chrom = c("chr19", "chr19"),
-                          spos  = c(0, 26000000),          # p-arm, q-arm
-                          epos  = c(1000000, 27000000))
-  anc_diploid_tract <- matrix(c(1, 2),   # sample1: p-arm=AFR, q-arm=EUR
-                               nrow = 1, ncol = 2, byrow = TRUE)
-  pure_codes_named <- c(AFR = 1L, EUR = 2L)
-  mixed_codes_df <- data.frame(code = 3L, pop1 = "AFR", pop2 = "EUR",
-                                stringsAsFactors = FALSE)
-
-  gla <- .compute_arm_gla(tract_df, anc_diploid_tract, pure_codes_named, mixed_codes_df)
-  mat <- gla$chr19
-  expect_equal(unname(mat["p", "AFR"]), 1.0)
-  expect_equal(unname(mat["p", "EUR"]), 0.0)
-  expect_equal(unname(mat["q", "AFR"]), 0.0)
-  expect_equal(unname(mat["q", "EUR"]), 1.0)
-})
 
 # ============================================================================
 # split_diploid() (2-population) GLA blending
