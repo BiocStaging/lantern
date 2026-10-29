@@ -116,29 +116,26 @@ package's Step 3 entry point; it does not run Step 1/2 for you (SMMAT
 runs can take hours, so this is always an explicit, separate call).
 }
 \examples{
-if (requireNamespace("GMMAT", quietly = TRUE) &&
-    requireNamespace("SeqVarTools", quietly = TRUE)) {
-  ext <- system.file("extdata", package = "lantern")
-  split <- ancestry_split(file.path(ext, "toy.vcf.gz"),
-                          file.path(ext, "toy.msp.tsv"),
-                          mode = "dosage", chrom = "chr19", verbose = FALSE)
-  out_dir <- tempfile()
-  gds <- write_ancestry_gds(split, out_dir, verbose = FALSE)
+ext <- system.file("extdata", package = "lantern")
+split <- ancestry_split(file.path(ext, "toy.vcf.gz"),
+                        file.path(ext, "toy.msp.tsv"),
+                        mode = "dosage", chrom = "chr19", verbose = FALSE)
+out_dir <- tempfile()
+gds <- write_ancestry_gds(split, out_dir, verbose = FALSE)
 
-  pheno <- read.delim(file.path(ext, "toy_pheno.tsv"))
-  kinship <- diag(nrow(pheno))   # unrelated samples
-  dimnames(kinship) <- list(pheno$id, pheno$id)
+pheno <- read.delim(file.path(ext, "toy_pheno.tsv"))
+kinship <- diag(nrow(pheno))   # unrelated samples
+dimnames(kinship) <- list(pheno$id, pheno$id)
 
-  # gene_group_file: a path, or a data.frame with the same six columns
-  out <- ancestry_smmat(gds, pheno, y ~ age + sex, kinship,
-                        file.path(ext, "toy_genes.tsv"),
-                        ancestry_counts = split$ancestry_counts,
-                        variant_info    = split$variant_info,
-                        verbose = FALSE)
-  out$results              # per-gene p-values + Cauchy combination
-  head(out$smmat_results$AFR)   # raw GMMAT::SMMAT() output for AFR
-  unlink(out_dir, recursive = TRUE)
-}
+# gene_group_file: a path, or a data.frame with the same six columns
+out <- ancestry_smmat(gds, pheno, y ~ age + sex, kinship,
+                      file.path(ext, "toy_genes.tsv"),
+                      ancestry_counts = split$ancestry_counts,
+                      variant_info    = split$variant_info,
+                      verbose = FALSE)
+out$results              # per-gene p-values + Cauchy combination
+head(out$smmat_results$AFR)   # raw GMMAT::SMMAT() output for AFR
+unlink(out_dir, recursive = TRUE)
 
 }
 \seealso{
