@@ -8,6 +8,13 @@
 Full documentation, vignettes, and function reference: **[https://yuw444.github.io/lantern/](https://yuw444.github.io/lantern/)**.
 Preprint: [doi:10.64898/2026.04.24.26351693](https://doi.org/10.64898/2026.04.24.26351693) (medRxiv).
 
+Vignettes:
+
+- [Getting started](https://yuw444.github.io/lantern/articles/lantern.html): the full workflow (split, write GDS, test) on simulated data.
+- [Split intuition](https://yuw444.github.io/lantern/articles/split-intuition.html): the split arithmetic, checked by hand on small matrices, for two and more populations.
+- [Toy VCF + MSP example](https://yuw444.github.io/lantern/articles/toy-vcf-msp-example.html): building the input files by hand and splitting them.
+- [Real data, chr19](https://yuw444.github.io/lantern/articles/real-data-chr19.html): association testing in a real cohort with binary, continuous and count phenotypes.
+
 ## Features
 
 - **Pure C backend** for performance-critical operations
@@ -23,7 +30,8 @@ Preprint: [doi:10.64898/2026.04.24.26351693](https://doi.org/10.64898/2026.04.24
 lantern has been submitted to Bioconductor and is under review
 ([Bioconductor/BiocContributions#229](https://github.com/Bioconductor/BiocContributions/issues/229)).
 Until it is accepted, install the development version from GitHub with
-BiocManager, which also installs the Bioconductor dependencies (SeqArray):
+BiocManager, which also installs the dependencies (SeqArray, SeqVarTools,
+GMMAT):
 
 ```r
 if (!requireNamespace("BiocManager", quietly = TRUE))
@@ -34,14 +42,6 @@ BiocManager::install("yuw444/lantern")
 
 Once lantern is available from Bioconductor, this becomes
 `BiocManager::install("lantern")`.
-
-`ancestry_smmat()` (the association tests) also needs GMMAT from CRAN and
-SeqVarTools from Bioconductor:
-
-```r
-install.packages("GMMAT")
-BiocManager::install("SeqVarTools")
-```
 
 ## Citation
 
@@ -66,6 +66,10 @@ input data you have:
   deterministically assigned to the ancestry pool it was inferred to
   originate from — no proportional estimation needed. Entry point:
   `ancestry_split_phased()` / `split_haplotype()`.
+
+The examples below use small matrices. For the full workflow from a VCF and
+an MSP file to gene-level p-values, see
+[Getting started](https://yuw444.github.io/lantern/articles/lantern.html).
 
 ```r
 library(lantern)
@@ -163,6 +167,8 @@ Produced by parsing an RFMix `.msp` file, or supplied directly.
 
 The `.msp.tsv[.gz]` file is one of several outputs written by
 [RFMix2](https://github.com/slowkoni/rfmix), a local-ancestry inference tool.
+(The [toy VCF + MSP example](https://yuw444.github.io/lantern/articles/toy-vcf-msp-example.html)
+writes a small MSP file by hand, if you want one to experiment with.)
 A typical run that produces it looks like:
 
 ```bash
@@ -175,14 +181,7 @@ rfmix -f query.phased.vcf.gz \
 ```
 
 This writes several sibling files sharing the `LANTERN_chr19` prefix; LANTERN
-only reads the `.msp.tsv.gz`:
-
-| File             | Content                                                                           | Used by LANTERN?                                                                                |
-| ---------------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `*.msp.tsv.gz` | Viterbi (most-likely) local-ancestry call per haplotype per tract                 | **Yes** — `.parse_msp()` / `ancestry_split_phased()` / `ancestry_split_combined()` |
-| `*.fb.tsv.gz`  | Forward-backward posterior probability per population per haplotype per marker    | No                                                                                              |
-| `*.rfmix.Q.gz` | Global (genome-wide) ancestry proportion per sample, ADMIXTURE-style`.Q` format | No                                                                                              |
-| `*.sis.tsv.gz` | Per-SNP interpolated ancestry probability                                         | No                                                                                              |
+only reads the `.msp.tsv.gz`.                                                                                          |
 
 ##### MSP file structure
 
@@ -290,7 +289,7 @@ Matrix-in, matrix-out primitives (C backend), used internally by the pipelines a
 | Function                                                             | Description                                                                                |
 | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | `count_ancestry_codes(mat, code)`                                  | Count occurrences of an ancestry code in each row of a PT matrix.                          |
-| `write_dosage_gds(dosage_mat, variant_info, sample_ids, gds_path)` | Convert an ancestry-specific dosage matrix to a SeqArray GDS file (for`GMMAT::SMMAT()`). |
+| `write_dosage_gds(dosage_mat, variant_info, sample_ids, gds_path)` | Convert an ancestry-specific dosage matrix to a SeqArray GDS file (for `GMMAT::SMMAT()`). |
 
 ### Statistics
 
@@ -305,89 +304,104 @@ estimate**, because an unphased genotype only tells you *how many* alt alleles
 a sample carries, not *which parental haplotype* each one sits on. The
 **phased split never has to estimate**, because phasing plus a local-ancestry
 call already answers that question directly, allele by allele.
+[Split intuition](https://yuw444.github.io/lantern/articles/split-intuition.html)
+works through both splits by hand on small matrices.
 
 ### Dosage (Proportional) Split
 
-For heterozygous genotypes (gt=1) with mixed ancestry (pt=2), the algorithm uses
-population-based proportions (p1, p2):
+An unphased genotype gives a sample's alt-allele dosage $g \in \{0, 1, 2\}$,
+and the local-ancestry call gives the pair of ancestries of its two
+haplotypes. Most carriers are unambiguous:
+
+- **Pure carriers** (both haplotypes from ancestry $k$): all $g$ alleles go to $k$.
+- **Mixed homozygous alt** ($g = 2$, ancestries $i/j$): one allele must be
+  on each haplotype, so $i$ and $j$ get 1 each.
+
+The one ambiguous case is a **mixed heterozygote** ($g = 1$, $i \ne j$): its
+allele is on either the $i$ or the $j$ haplotype, and the genotype doesn't
+say which. Its split is estimated from the variant's unambiguous carriers.
 
 #### Formulas
 
-```
-p1 = (2*N1 + N2 + N4) / (2*N1 + N2 + 2*N4 + 2*N7 + N8)
-p2 = (N4 + 2*N7 + N8) / (2*N1 + N2 + 2*N4 + 2*N7 + N8)
-```
+For a variant, let $N_{kk}^{(g)}$ count carriers with homozygous local
+ancestry $k/k$ and alt-allele dosage $g$, and $N_{ij}^{(g)} = N_{ji}^{(g)}$
+those with heterozygous local ancestry $i/j$, $i \ne j$. The number of
+unambiguous alt alleles on ancestry $k$ is
 
-Where N1-N8 are counts per variant, over PT and GT matrix entries for the same sample:
+$$
+n_k = 2N_{kk}^{(2)} + N_{kk}^{(1)} + \sum_{i<j:\ k \in \{i,j\}} N_{ij}^{(2)}.
+$$
 
-| Code | PT, GT     | Description                   |
-| ---- | ---------- | ----------------------------- |
-| N1   | pt=3, gt=2 | Pure African, homozygous alt  |
-| N2   | pt=3, gt=1 | Pure African, heterozygous    |
-| N4   | pt=2, gt=2 | Mixed, homozygous alt         |
-| N5   | pt=2, gt=1 | Mixed, heterozygous           |
-| N7   | pt=1, gt=2 | Pure European, homozygous alt |
-| N8   | pt=1, gt=1 | Pure European, heterozygous   |
+With two populations and the ancestry codes of `split_diploid()`:
 
-#### Special Cases
+| Ancestry code | $g = 1$ | $g = 2$ |
+| ------------- | ------- | ------- |
+| 3 = AFR/AFR   | $N_\text{AFR,AFR}^{(1)}$ | $N_\text{AFR,AFR}^{(2)}$ |
+| 2 = AFR/EUR   | $N_\text{AFR,EUR}^{(1)}$ (ambiguous) | $N_\text{AFR,EUR}^{(2)}$ |
+| 1 = EUR/EUR   | $N_\text{EUR,EUR}^{(1)}$ | $N_\text{EUR,EUR}^{(2)}$ |
 
-- **Homozygous alt (gt=2)**: 1 allele to each ancestry regardless of pt
-- **Pure ancestry (pt=1 or pt=3)**: All alt alleles to that ancestry
-- **N5 dominates**: When ambiguous mixed-ancestry heterozygotes (N5) make up
-  most or all of a variant's carriers — up to and including the singleton
-  case, N5 = every carrier, where the formula is literally undefined
-  (denominator = 0) — the raw p1/p2 ratio becomes unreliable. `ancestry_split()`
-  applies **shrinkage toward 1/2** to fix this; see below.
+so $n_\text{AFR} = 2N_\text{AFR,AFR}^{(2)} + N_\text{AFR,AFR}^{(1)} + N_\text{AFR,EUR}^{(2)}$,
+and likewise for EUR.
+
+An ambiguous carrier with local ancestry $i/j$ is split within its own pair,
+in proportion to that pair's unambiguous alleles. The raw split is
+
+$$
+\tilde{\pi}_{ij} = \frac{n_i}{n_i + n_j}.
+$$
+
+When $n_i + n_j = 0$ (e.g. a singleton carried by a mixed heterozygote) the
+raw split is undefined and falls back to 1/2. `ancestry_split()` doesn't use
+the raw split as is; it shrinks it toward 1/2, as described below.
 
 #### Shrinkage toward 1/2: why an ambiguous-dominated variant needs it
 
-The raw formula estimates a variant's ancestry split from its own
-unambiguous carriers, then applies that ratio to the ambiguous ones. That
-works fine when unambiguous carriers are plentiful — but consider N5 = 10
-(ten ambiguous mixed-ancestry heterozygotes) with everything else zero
-except N7 = 1 (one pure-European homozygous-alt carrier):
+The raw split estimates a variant's ancestry split from its own unambiguous
+carriers, then applies that ratio to the ambiguous ones. That works fine
+when unambiguous carriers are plentiful. But consider ten ambiguous AFR/EUR
+heterozygotes ($N_\text{AFR,EUR}^{(1)} = 10$) and one pure-European
+homozygous-alt carrier ($N_\text{EUR,EUR}^{(2)} = 1$), with everything else
+zero:
 
-```
-total_alt   = 2*N1 + N2 + 2*N4 + N5 + 2*N7 + N8 = 2*0+0+2*0+10+2*1+0 = 12
-denominator = total_alt - N5                    = 12 - 10             = 2
-p1 = (2*N1 + N2 + N4) / denominator = (0+0+0) / 2 = 0
-p2 = (N4 + 2*N7 + N8) / denominator = (0+2+0) / 2 = 1
-```
+$$
+n_\text{AFR} = 0, \qquad n_\text{EUR} = 2, \qquad
+\tilde{\pi}_\text{AFR,EUR} = \frac{0}{0 + 2} = 0.
+$$
 
-The formula confidently assigns **all ten** ambiguous carriers 100% European
-ancestry (p1=0, p2=1), extrapolated from a single unambiguous data point.
-Unlike the pure singleton, this isn't a "no answer" case — the denominator is
-nonzero, so nothing flags it as unreliable. It's a *confidently
-wrong-looking* answer: the raw formula can't distinguish "1 unambiguous
-carrier informing 2 total alt alleles" from "1 unambiguous carrier informing
-100 total" — it takes whatever ratio it computes at face value, regardless of
-how little evidence backs it.
+The raw split confidently assigns **all ten** ambiguous alleles to European
+haplotypes, extrapolated from a single unambiguous carrier. Unlike the
+singleton, this isn't a "no answer" case: $n_i + n_j$ is nonzero, so nothing
+flags it as unreliable. The raw split can't distinguish "1 unambiguous
+carrier and 10 ambiguous ones" from "1 unambiguous carrier and nothing
+else"; it takes whatever ratio it computes at face value, regardless of how
+little evidence backs it.
 
-**Shrinkage toward 1/2** fixes this — and the pure singleton — with one
-mechanism: discount the raw ratio in proportion to how much of a variant's
-evidence is actually ambiguous, and fill in the rest with an even split:
+**Shrinkage toward 1/2** fixes this, and the singleton, with one mechanism:
+discount the raw split by $w_{ij}$, the ambiguous share of the evidence
+about the pair, and fill in the rest with an even split:
 
-```
-w  = N5 / total_alt   # ambiguous share of this variant's alt-allele confidence
-p1 = (1 - w) * p1_raw + w * 0.5
-p2 = 1 - p1
-```
+$$
+w_{ij} = \frac{N_{ij}^{(1)}}{n_i + n_j + N_{ij}^{(1)}}, \qquad
+\pi_{ij} = (1 - w_{ij})\,\tilde{\pi}_{ij} + 1/2\; w_{ij}
+         = \frac{n_i + 1/2\, N_{ij}^{(1)}}{n_i + n_j + N_{ij}^{(1)}}.
+$$
 
-`total_alt` is the same allele-weighted quantity computed above
-(`2*N1 + N2 + 2*N4 + N5 + 2*N7 + N8`): hom-alt carriers count 2x, since each
-one carries two alt alleles' worth of ancestry evidence, versus 1x for a het
-carrier or an ambiguous mixed het (`N5`, which always carries exactly one,
-unresolved, allele). An unweighted per-*individual* denominator would treat
-a hom-alt carrier the same as a het one and under-count its evidence.
+The carrier gets $x_i = \pi_{ij}$ and $x_j = 1 - \pi_{ij}$, and 0 for every
+other ancestry. The last form reads directly: each ambiguous carrier counts
+as half an allele on each of its two ancestries. In $n_k$, homozygous-alt
+carriers count 2x, since each carries two alt alleles' worth of ancestry
+evidence, versus 1x for a heterozygote or an ambiguous carrier (which
+always carries exactly one, unresolved, allele). A per-*individual* count
+would treat a homozygous-alt carrier the same as a heterozygote and
+under-count its evidence.
 
-For the example above, `w = 10/12 ≈ 0.83` — the near-total ambiguity is
-mostly (not fully — the hom-alt carrier's 2 alleles of evidence hold more
-weight than a het would) discounted, giving `p1 = 5/12 ≈ 0.42, p2 ≈ 0.58`
-instead of the raw formula's `p1=0, p2=1` — a moderate estimate instead of a
-hard call backed by one data point. `w = 0` (unambiguous carriers dominate)
-leaves the raw formula untouched; `w = 1` (the pure singleton) gives exactly
-0.5/0.5 — the old special case is just one end of this same continuum, not a
-separate mechanism.
+For the example above, $w_\text{AFR,EUR} = 10/(0 + 2 + 10) = 10/12 \approx 0.83$
+and $\pi_\text{AFR,EUR} = (0 + 10/2)/12 = 5/12 \approx 0.42$, instead of the
+raw split's 0: a moderate estimate instead of a hard call backed by one
+carrier. $w_{ij} = 0$ (no ambiguous carriers) leaves the raw split
+untouched; $w_{ij} = 1$ ($n_i + n_j = 0$, e.g. the singleton) gives exactly
+$\pi_{ij} = 1/2$. The singleton fallback is one end of the same continuum,
+not a separate mechanism.
 
 **Why 1/2?** A mixed-ancestry heterozygote carries exactly one African and
 one European haplotype at the site, so which one holds the allele depends on
@@ -400,53 +414,34 @@ both assigned alleles more accurately and gave more power when the causal
 effect was on European alleles.
 
 `ancestry_split(mode = "dosage")` always applies this. At the matrix level,
-`split_diploid()`/`split_diploid_multi()` take the target through their
-optional `gla` + `arm_id` arguments (a one-row matrix of 1/K with all-zero
-`arm_id` gives the same 1/2 shrinkage); leaving them `NULL` (the default)
-gives the raw ratio with only the flat 0.5 singleton fallback. See
-`vignette("split-intuition")` for a worked example and the K > 2
-generalisation.
+`split_diploid()`/`split_diploid_multi()` apply it with `shrink = TRUE`;
+the default `shrink = FALSE` gives the raw split $\tilde{\pi}_{ij}$ with only
+the 1/2 fallback when $n_i + n_j = 0$. See
+[Split intuition, Part C](https://yuw444.github.io/lantern/articles/split-intuition.html#part-c-shrinkage-toward-12)
+for worked examples.
 
-#### Intuition for K > 2 populations (`split_diploid_multi`)
+#### More than two populations (`split_diploid_multi`)
 
-With more than two source populations, each mixed ancestry code names an
-*unordered pair* of parent populations (e.g. code 5 = AFR/NAT). The algorithm
-generalises p1/p2 to K populations in two passes per variant:
+The formulas above are already written for any number of populations $K$.
+With $K$ populations each mixed ancestry code names an *unordered pair* of
+populations (e.g. code 5 = AFR/NAT), and:
 
-1. **Build a per-population proportion from unambiguous carriers.** A pure
-   homozygous-alt sample contributes 2 alleles to its own population's count;
-   a pure heterozygote contributes 1; and — the key unambiguous case — a
-   **mixed-pair homozygous-alt** sample contributes exactly 1 allele to
-   *each* of its two parent populations, because carrying two alt copies with
-   ancestry split between two populations means one copy must have come from
-   each side. Dividing by the variant's total unambiguous alt-allele count
-   gives $p_1, \ldots, p_K$ (summing to 1).
-2. **Distribute the ambiguous alleles proportionally, per pair.** A
-   mixed-pair heterozygote in pair $(i,j)$ carries exactly one alt allele but
-   its parental origin is unknown, so it's split using the conditional ratio
-   `p_i / (p_i + p_j)` — in proportion to how often *just those two*
-   populations' alleles show up unambiguously elsewhere at this variant.
-   Shrinkage toward 1/2 (see above) generalises **per pair**, not only as a
-   fallback for `p_i + p_j == 0` (the singleton case): it continuously
-   discounts the raw ratio by `w_ij` = (pair `(i,j)`'s own ambiguous-het
-   count) / (this variant's total allele-weighted confidence — every
-   population's unambiguous alt alleles, hom-alt carriers counted 2x, plus
-   every mixed pair's own ambiguous-het count, not just pair `(i,j)`'s),
-   blending toward an even split within the pair:
+- A **mixed homozygous-alt** carrier in pair $i/j$ adds one allele to each
+  of $n_i$ and $n_j$ (the sum in $n_k$).
+- A **mixed heterozygote** in pair $i/j$ is split only between $i$ and $j$,
+  with $\tilde{\pi}_{ij}$, $w_{ij}$ and $\pi_{ij}$ computed from that pair's
+  evidence alone. Alleles on other ancestries, and other pairs' ambiguous
+  carriers, say nothing about $i$ versus $j$, so they don't enter
+  $w_{ij}$: a variant with many NAT carriers shrinks its AFR/EUR split
+  exactly as much as one without them.
+- The blend stays inside the pair, so an ambiguous AFR/EUR carrier never
+  gets any dosage on a third population like NAT, however strongly it is
+  shrunk.
 
-   ```
-   p_i/(p_i+p_j)  <-  (1 - w_ij) * p_i/(p_i+p_j) + w_ij * 0.5
-   ```
-
-   The blend stays inside the pair, so an ambiguous AFR/EUR het is never
-   assigned any dosage toward a third population like NAT, no matter how
-   strongly shrinkage applies — only AFR and EUR ever receive a share.
-   `w_ij = 0` leaves the raw ratio untouched; `w_ij = 1` (pair `(i,j)`'s only
-   alt carriers are its own ambiguous hets) gives exactly 0.5/0.5 — same
-   continuum as the two-population case, applied independently per pair.
-
-With K=2 there's only one mixed code and one pair, so this reduces exactly
-to the p1/p2 formulas above.
+With $K = 2$ there is only one pair, and the formulas are those of the
+two-population table above.
+[Split intuition, Part B](https://yuw444.github.io/lantern/articles/split-intuition.html#part-b-more-than-two-populations)
+checks a three-population split by hand.
 
 ### Phased Split
 
@@ -481,6 +476,10 @@ a genotype) doesn't exist once haplotypes are individually ancestry-labeled.
 file (plus, typically, once more on the unsplit "observed" GT GDS), then
 combines the per-population p-values into a single gene-level result with
 `cauchy_combine()`.
+[Getting started](https://yuw444.github.io/lantern/articles/lantern.html)
+runs it on simulated data, and
+[Real data, chr19](https://yuw444.github.io/lantern/articles/real-data-chr19.html)
+on a real cohort.
 
 ### Why per-population p-values aren't combined equally
 
@@ -493,7 +492,7 @@ equal weights, `ancestry_smmat()` weights each population's p-value by how
 much pure-ancestry evidence backs it *at that specific gene*:
 
 ```
-w_k(gene) = median over the gene's variants of:
+o_k(gene) = median over the gene's variants of:
               (count of cohort samples with pure ancestry k at that variant)
 ```
 
@@ -509,8 +508,9 @@ wasn't supplied), `ancestry_smmat()` falls back to equal weighting across
 all K populations instead.
 
 This weight computation happens automatically inside `ancestry_smmat()` —
-there's no separate weight-finding step to run. See `?ancestry_smmat` for
-the full argument/return-value reference.
+there's no separate weight-finding step to run. See
+[`?ancestry_smmat`](https://yuw444.github.io/lantern/reference/ancestry_smmat.html)
+for the full argument/return-value reference.
 
 ## Dependencies
 
@@ -520,9 +520,10 @@ the full argument/return-value reference.
 | ------------------------------------------------------------ | --------- | ------------ | ---------------------- |
 | [data.table](https://cran.r-project.org/package=data.table)   | Required  | CRAN         | —                     |
 | [SeqArray](https://bioconductor.org/packages/SeqArray/)       | Required  | Bioconductor | GDS file I/O           |
-| [GMMAT](https://cran.r-project.org/package=GMMAT)             | Suggested | CRAN         | SMMAT gene-level tests |
+| [GMMAT](https://cran.r-project.org/package=GMMAT)             | Required  | CRAN         | SMMAT gene-level tests |
+| [SeqVarTools](https://bioconductor.org/packages/SeqVarTools/) | Required  | Bioconductor | GMMAT reads GDS dosages through it |
 
-**Bioconductor packages (SeqArray) are not installed automatically by `devtools::install_github()`.**
+**Bioconductor packages (SeqArray, SeqVarTools) are not installed automatically by `devtools::install_github()`.**
 Use the `BiocManager` installation instructions above.
 
 ### System tools
