@@ -9,8 +9,7 @@ split_diploid_multi(
   ancestry,
   pure_codes = c(AFR = 3L, EUR = 1L),
   mixed_codes = data.frame(code = 2L, pop1 = "AFR", pop2 = "EUR"),
-  gla = NULL,
-  arm_id = NULL
+  shrink = FALSE
 )
 }
 \arguments{
@@ -40,18 +39,14 @@ two-population mixed code 2 = AFR/EUR, so with both defaults
 Example for 3 populations:
 \code{data.frame(code=c(2L,5L,6L), pop1=c("AFR","AFR","EUR"), pop2=c("EUR","NAT","NAT"))}}
 
-\item{gla}{Optional shrinkage target: numeric matrix with one row per
-target group and columns matching \code{names(pure_codes)}. Each
-ambiguous pair (a, b) is shrunk toward \eqn{t_a / (t_a + t_b)} by the
-pair's ambiguous share \eqn{w} of the evidence.
-\code{\link{ancestry_split}} uses a single row of 1/K (i.e. 1/2 for
-every pair). When \code{NULL} (default), no shrinkage: the raw p[k]
-ratio is used, with a 0.5/0.5 fallback only when a pair has no
-unambiguous evidence.}
-
-\item{arm_id}{Optional integer vector (length = \code{nrow(gt_genotype)})
-giving each variant's row index into \code{gla} (0-based; all zeros for
-a one-row target). Required together with \code{gla}.}
+\item{shrink}{If \code{TRUE}, shrink each ambiguous pair (a, b) toward
+1/2 by \eqn{w = N_{ab} / (n_a + n_b + N_{ab})}, the ambiguous share of
+that pair's own evidence: \eqn{n_a}, \eqn{n_b} are the unambiguous
+alleles on a and b (hom-alt carriers count 2; a mixed hom-alt gives 1 to
+each), and \eqn{N_{ab}} the pair's ambiguous heterozygotes. Alleles on
+other populations do not enter \eqn{w}. \code{\link{ancestry_split}}
+always shrinks. If \code{FALSE} (default), the raw p[k] ratio is used,
+with a 0.5/0.5 fallback only when a pair has no unambiguous evidence.}
 }
 \value{
 Named list of K numeric matrices (variants x samples), one per

@@ -76,8 +76,10 @@ combination.
   \deqn{p = (1 - w)\, p_{raw} + w / 2.}
   A variant carried only by ambiguous heterozygotes (\eqn{w = 1}) is
   split 1/2 : 1/2. With K populations every pair is shrunk toward 1/2
-  in the same way. \code{mode = "haplotype"} is deterministic and
-  applies no shrinkage.
+  in the same way, with \eqn{w} computed from that pair's own evidence
+  (the unambiguous alleles on its two populations and its ambiguous
+  heterozygotes); see \code{\link{split_diploid_multi}}.
+  \code{mode = "haplotype"} is deterministic and applies no shrinkage.
 }
 
 \examples{

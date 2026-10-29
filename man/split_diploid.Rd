@@ -4,7 +4,7 @@
 \alias{split_diploid}
 \title{Split genotype matrix by ancestry}
 \usage{
-split_diploid(gt_genotype, ancestry, gla = NULL, arm_id = NULL)
+split_diploid(gt_genotype, ancestry, shrink = FALSE)
 }
 \arguments{
 \item{gt_genotype}{Integer matrix of genotypes (0, 1, 2)
@@ -15,17 +15,12 @@ split_diploid(gt_genotype, ancestry, gla = NULL, arm_id = NULL)
 - Same dimensions as gt_genotype
 - Values: 1=EUR/EUR, 2=AFR/EUR (mixed), 3=AFR/AFR}
 
-\item{gla}{Optional shrinkage target: numeric matrix with one row per
-target group and two columns (AFR, EUR) of target proportions. A mixed
-heterozygote's split is shrunk toward its row's AFR share by the
-ambiguous share \eqn{w} of the variant's evidence.
-\code{\link{ancestry_split}} uses a single row of 1/2. When \code{NULL}
-(default), no shrinkage: the raw p1/p2 ratio is used, with a 0.5/0.5
+\item{shrink}{If \code{TRUE}, shrink each mixed heterozygote's split
+toward 1/2 by \eqn{w = N_5 / (D + N_5)}, the ambiguous share of the
+variant's alternate alleles (\eqn{D} unambiguous, \eqn{N_5} ambiguous;
+hom-alt carriers count 2), as \code{\link{ancestry_split}} does. If
+\code{FALSE} (default), the raw p1/p2 ratio is used, with a 0.5/0.5
 fallback only when every carrier is ambiguous.}
-
-\item{arm_id}{Optional integer vector (length = \code{nrow(gt_genotype)})
-giving each variant's row index into \code{gla} (0-based; all zeros for
-a one-row target). Required together with \code{gla}.}
 }
 \value{
 List with two elements:

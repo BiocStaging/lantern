@@ -17,56 +17,22 @@
     .Call("count_ancestry_codes_C", mat, code, PACKAGE = "lantern")
 }
 
-#' Normalize gla/arm_id into .Call-ready sentinels
-#'
-#' \code{gla = NULL} (either argument NULL) disables shrinkage: an empty
-#' matrix/vector signal the C side to reproduce the pre-shrinkage behavior
-#' exactly (see \code{ancestry.c}).
-#' @keywords internal
-.gla_call_args <- function(gla, arm_id) {
-  if (is.null(gla) || is.null(arm_id))
-    return(list(gla = matrix(numeric(0), nrow = 0, ncol = 0), arm_id = integer(0)))
-  storage.mode(gla) <- "double"
-  list(gla = gla, arm_id = as.integer(arm_id))
+# Target arguments for the C splitters. The C code shrinks each ambiguous
+# pair (a, b) toward t_a / (t_a + t_b) of a target matrix; a one-row 1/K
+# target (all variants on row 0) gives 1/2 for every pair. An empty matrix
+# means no shrinkage, with a 0.5/0.5 fallback only when a pair has no
+# unambiguous evidence.
+.shrink_call_args <- function(shrink, n_variants, n_pops) {
+  if (!shrink)
+    return(list(target = matrix(numeric(0), nrow = 0, ncol = 0), row = integer(0)))
+  list(target = matrix(1 / n_pops, nrow = 1L, ncol = n_pops), row = integer(n_variants))
 }
 
-# Checks for the optional shrinkage target of split_diploid()/
-# split_diploid_multi(): both or neither, one target row per arm_id value.
-.check_shrink_target <- function(gla, arm_id, n_variants, n_pops) {
-  if (is.null(gla) != is.null(arm_id))
-    stop("`gla` and `arm_id` must be supplied together", call. = FALSE)
-  if (is.null(gla)) return(invisible(NULL))
-  .check_matrix(gla, "gla")
-  if (ncol(gla) != n_pops)
-    stop("`gla` must have one column per population (", n_pops, ")",
-         call. = FALSE)
-  if (any(gla < 0, na.rm = TRUE) || anyNA(gla))
-    stop("`gla` must contain non-negative proportions", call. = FALSE)
-  if (length(arm_id) != n_variants || anyNA(arm_id) ||
-      any(arm_id < 0 | arm_id >= nrow(gla)))
-    stop("`arm_id` must have one 0-based row index into `gla` per variant ",
-         "(length ", n_variants, ", values 0 to ", nrow(gla) - 1L, ")",
-         call. = FALSE)
-  invisible(NULL)
-}
-
-#' Uniform shrinkage target: 1/K for each of K populations
-#'
-#' One-row target matrix for \code{split_diploid()} /
-#' \code{split_diploid_multi()}'s \code{gla} argument (use with an all-zero
-#' \code{arm_id}). For every ambiguous pair the C code shrinks toward the
-#' pair's target share \code{t_a / (t_a + t_b)}, which is exactly 1/2 here.
-#' @keywords internal
-.uniform_shrink_target <- function(pop_names) {
-  matrix(1 / length(pop_names), nrow = 1L, ncol = length(pop_names),
-         dimnames = list("all", pop_names))
-}
-
-.split_diploid <- function(gt_genotype, ancestry, gla = NULL, arm_id = NULL) {
+.split_diploid <- function(gt_genotype, ancestry, shrink = FALSE) {
     storage.mode(gt_genotype) <- "integer"
     storage.mode(ancestry) <- "integer"
-    g <- .gla_call_args(gla, arm_id)
-    .Call("split_by_ancestry_C", gt_genotype, ancestry, g$gla, g$arm_id, PACKAGE = "lantern")
+    g <- .shrink_call_args(shrink, nrow(gt_genotype), 2L)
+    .Call("split_by_ancestry_C", gt_genotype, ancestry, g$target, g$row, PACKAGE = "lantern")
 }
 
 .split_haplotype <- function(gt_hap0, gt_hap1, anc_hap0, anc_hap1,
@@ -134,24 +100,20 @@ count_ancestry_codes <- function(mat, code) {
 #' result$african
 #' result$european
 #'
-#' @param gla Optional shrinkage target: numeric matrix with one row per
-#'   target group and two columns (AFR, EUR) of target proportions. A mixed
-#'   heterozygote's split is shrunk toward its row's AFR share by the
-#'   ambiguous share \eqn{w} of the variant's evidence.
-#'   \code{\link{ancestry_split}} uses a single row of 1/2. When \code{NULL}
-#'   (default), no shrinkage: the raw p1/p2 ratio is used, with a 0.5/0.5
+#' @param shrink If \code{TRUE}, shrink each mixed heterozygote's split
+#'   toward 1/2 by \eqn{w = N_5 / (D + N_5)}, the ambiguous share of the
+#'   variant's alternate alleles (\eqn{D} unambiguous, \eqn{N_5} ambiguous;
+#'   hom-alt carriers count 2), as \code{\link{ancestry_split}} does. If
+#'   \code{FALSE} (default), the raw p1/p2 ratio is used, with a 0.5/0.5
 #'   fallback only when every carrier is ambiguous.
-#' @param arm_id Optional integer vector (length = \code{nrow(gt_genotype)})
-#'   giving each variant's row index into \code{gla} (0-based; all zeros for
-#'   a one-row target). Required together with \code{gla}.
 #'
 #' @export
-split_diploid <- function(gt_genotype, ancestry, gla = NULL, arm_id = NULL) {
+split_diploid <- function(gt_genotype, ancestry, shrink = FALSE) {
     .check_matrix(gt_genotype, values = 0:2)
     .check_matrix(ancestry)   # unrecognised codes are allowed: they contribute nothing
     .check_same_dim(gt_genotype, ancestry)
-    .check_shrink_target(gla, arm_id, nrow(gt_genotype), 2L)
-    .split_diploid(gt_genotype, ancestry, gla, arm_id)
+    .check_flag(shrink)
+    .split_diploid(gt_genotype, ancestry, shrink)
 }
 
 #' Split unphased genotype matrix by ancestry for K populations
@@ -213,17 +175,14 @@ split_diploid <- function(gt_genotype, ancestry, gla = NULL, arm_id = NULL) {
 #' out <- split_diploid_multi(gt, anc, pure, mixed)
 #' names(out)   # "AFR" "EUR" "NAT"
 #'
-#' @param gla Optional shrinkage target: numeric matrix with one row per
-#'   target group and columns matching \code{names(pure_codes)}. Each
-#'   ambiguous pair (a, b) is shrunk toward \eqn{t_a / (t_a + t_b)} by the
-#'   pair's ambiguous share \eqn{w} of the evidence.
-#'   \code{\link{ancestry_split}} uses a single row of 1/K (i.e. 1/2 for
-#'   every pair). When \code{NULL} (default), no shrinkage: the raw p[k]
-#'   ratio is used, with a 0.5/0.5 fallback only when a pair has no
-#'   unambiguous evidence.
-#' @param arm_id Optional integer vector (length = \code{nrow(gt_genotype)})
-#'   giving each variant's row index into \code{gla} (0-based; all zeros for
-#'   a one-row target). Required together with \code{gla}.
+#' @param shrink If \code{TRUE}, shrink each ambiguous pair (a, b) toward
+#'   1/2 by \eqn{w = N_{ab} / (n_a + n_b + N_{ab})}, the ambiguous share of
+#'   that pair's own evidence: \eqn{n_a}, \eqn{n_b} are the unambiguous
+#'   alleles on a and b (hom-alt carriers count 2; a mixed hom-alt gives 1 to
+#'   each), and \eqn{N_{ab}} the pair's ambiguous heterozygotes. Alleles on
+#'   other populations do not enter \eqn{w}. \code{\link{ancestry_split}}
+#'   always shrinks. If \code{FALSE} (default), the raw p[k] ratio is used,
+#'   with a 0.5/0.5 fallback only when a pair has no unambiguous evidence.
 #'
 #' @export
 split_diploid_multi <- function(gt_genotype, ancestry,
@@ -231,7 +190,7 @@ split_diploid_multi <- function(gt_genotype, ancestry,
                                 mixed_codes = data.frame(code = 2L,
                                                          pop1 = "AFR",
                                                          pop2 = "EUR"),
-                                gla = NULL, arm_id = NULL) {
+                                shrink = FALSE) {
     .check_matrix(gt_genotype, values = 0:2)
     .check_matrix(ancestry)
     .check_same_dim(gt_genotype, ancestry)
@@ -244,10 +203,7 @@ split_diploid_multi <- function(gt_genotype, ancestry,
     if (length(bad))
         stop("mixed_codes references populations not in pure_codes: ",
              toString(bad))
-    if (!is.null(gla) && !identical(colnames(gla), pop_names))
-        stop("gla's columns must match names(pure_codes) exactly, in order: ",
-             toString(pop_names))
-    .check_shrink_target(gla, arm_id, nrow(gt_genotype), length(pop_names))
+    .check_flag(shrink)
 
     storage.mode(gt_genotype) <- "integer"
     storage.mode(ancestry)    <- "integer"
@@ -256,12 +212,12 @@ split_diploid_multi <- function(gt_genotype, ancestry,
     m_code <- as.integer(mixed_codes$code)
     m_pop1 <- match(mixed_codes$pop1, pop_names) - 1L   # 0-based index
     m_pop2 <- match(mixed_codes$pop2, pop_names) - 1L
-    g <- .gla_call_args(gla, arm_id)
+    g <- .shrink_call_args(shrink, nrow(gt_genotype), length(pop_names))
 
     result <- .Call("split_by_ancestry_multi_C",
                     gt_genotype, ancestry,
                     pure_codes, m_code, m_pop1, m_pop2,
-                    g$gla, g$arm_id,
+                    g$target, g$row,
                     PACKAGE = "lantern")
     names(result) <- pop_names
     result
@@ -450,10 +406,9 @@ read_bed_file <- function(bed, bim = sub("\\.bed$", ".bim", bed),
   headers    <- strsplit(readLines(con, n = 1), "\t")[[1]]
   sample_ids <- unique(sub("\\.[01]$", "", headers[7:length(headers)]))
 
-  if (verbose) {
-    message("    Found ", length(sample_ids), " samples, ", length(pop_codes), " populations")
-    message("    Pop codes: ", toString(sprintf("%s = %d", names(pop_codes), pop_codes)))
-  }
+  if (verbose)
+    message("  Ancestries detected: ", length(pop_codes), " (",
+            toString(sprintf("%s = %d", names(pop_codes), pop_codes)), ")")
 
   data_lines <- readLines(con)
   if (length(data_lines) == 0) stop("MSP file has no data rows")
@@ -567,10 +522,8 @@ read_bed_file <- function(bed, bim = sub("\\.bed$", ".bim", bed),
 #'
 #' @keywords internal
 .resolve_vcf_contig <- function(vcf_path, chrom) {
-  header <- tryCatch(
-    system2("bcftools", c("view", "-h", shQuote(vcf_path)),
-            stdout = TRUE, stderr = FALSE),
-    error = function(e) character(0))
+  header <- tryCatch(.bcftools(c("view", "-h", shQuote(vcf_path))),
+                     error = function(e) character(0))
   contig_ids <- sub("^##contig=<ID=([^,>]+).*$", "\\1",
                      grep("^##contig=<ID=", header, value = TRUE))
   if (length(contig_ids) == 0) return(NULL)
@@ -589,6 +542,20 @@ read_bed_file <- function(bed, bim = sub("\\.bed$", ".bim", bed),
 #' forces one; the default \code{"auto"} picks as above.
 #'
 #' @keywords internal
+# Run bcftools and return its stdout lines. system2() only warns on a
+# non-zero exit and returns the output so far (e.g. the records before a
+# malformed line), so check the status and stop with bcftools' own message.
+.bcftools <- function(args) {
+  err <- tempfile()
+  on.exit(unlink(err))
+  out <- suppressWarnings(system2("bcftools", args, stdout = TRUE, stderr = err))
+  status <- attr(out, "status")
+  if (!is.null(status) && status != 0L)
+    stop("bcftools ", args[1], " failed (exit status ", status, "):\n  ",
+         paste(utils::tail(readLines(err), 3L), collapse = "\n  "), call. = FALSE)
+  out
+}
+
 .vcf_reader <- function() {
   reader <- match.arg(getOption("lantern.vcf_reader", "auto"),
                       c("auto", "bcftools", "seqarray"))
@@ -602,8 +569,7 @@ read_bed_file <- function(bed, bim = sub("\\.bed$", ".bim", bed),
 #' @keywords internal
 .vcf_sample_ids <- function(vcf_path, reader) {
   if (reader == "seqarray") return(SeqArray::seqVCF_SampID(vcf_path))
-  res <- system2("bcftools", c("query", "-l", shQuote(vcf_path)),
-                 stdout = TRUE, stderr = FALSE)
+  res <- .bcftools(c("query", "-l", shQuote(vcf_path)))
   if (length(res) == 0) stop("bcftools query -l returned nothing")
   res
 }
@@ -639,9 +605,7 @@ read_bed_file <- function(bed, bim = sub("\\.bed$", ".bim", bed),
   args_gt <- c("query", target_arg,
                "-f", shQuote("%CHROM\\t%POS\\t%REF\\t%ALT[\\t%GT]\\n"),
                shQuote(vcf_path))
-  gt_output <- tryCatch(
-    system2("bcftools", args_gt, stdout = TRUE, stderr = FALSE),
-    error = function(e) stop("bcftools query failed: ", e$message))
+  gt_output <- .bcftools(args_gt)
   if (length(gt_output) == 0) stop("bcftools query returned no variants")
   if (verbose) message("  ", length(gt_output), " variant lines read")
 
@@ -735,40 +699,41 @@ read_bed_file <- function(bed, bim = sub("\\.bed$", ".bim", bed),
 .parse_vcf_msp_common <- function(vcf_path, msp_path, chrom = NULL, verbose = TRUE) {
 
   # ---- Step 1: Parse MSP ----
-  if (verbose) message("Step 1: Parsing RFMix MSP file...")
+  if (verbose) message("[1/8] Parsing RFMix MSP file...")
   msp <- .restrict_tracts(.parse_msp(msp_path, verbose = verbose), chrom)
   if (verbose) message("  MSP samples: ", length(msp$sample_ids),
                        "  Tracts: ", nrow(msp$tract_df),
                        if (!is.null(chrom)) c(" (chr ", chrom, " only)"))
 
   # ---- Step 2: VCF sample IDs ----
-  if (verbose) message("\nStep 2: Querying VCF sample IDs...")
+  if (verbose) message("\n[2/8] Querying VCF sample IDs...")
   reader <- .vcf_reader()
   vcf_samples <- tryCatch(
     .vcf_sample_ids(vcf_path, reader),
     error = function(e) stop("Could not read VCF sample IDs: ", e$message))
-  if (verbose) message("  VCF samples: ", length(vcf_samples))
+  if (verbose) message("  VCF samples: ", length(vcf_samples),
+                       " (read with ", if (reader == "bcftools") "bcftools" else "SeqArray", ")")
 
   # ---- Step 3: Intersect samples ----
-  if (verbose) message("\nStep 3: Intersecting samples...")
+  if (verbose) message("\n[3/8] Intersecting samples...")
   common_samples <- intersect(vcf_samples, msp$sample_ids)
   if (length(common_samples) == 0)
     stop("No common samples between VCF and MSP")
   if (verbose) message("  Common: ", length(common_samples))
 
   # ---- Step 4: Parse VCF GT ----
-  if (verbose) message("\nStep 4: Parsing VCF genotypes...")
+  if (verbose) message("\n[4/8] Parsing VCF genotypes...")
   geno <- .read_vcf_haplotypes(vcf_path, chrom, reader,
                                match(common_samples, vcf_samples),
                                common_samples, verbose)
 
   # ---- Step 5: Map variants to tracts ----
-  if (verbose) message("\nStep 5: Mapping variants to ancestry tracts...")
+  if (verbose) message("\n[5/8] Mapping variants to ancestry tracts...")
   geno <- .map_variants_to_tracts(geno, msp$tract_df, chrom, verbose)
 
   # ---- Step 6: Broadcast tract ancestry to variants ----
   # Each variant takes its tract's per-sample ancestry calls.
-  if (verbose) message("\nStep 6: Broadcasting ancestry to variants...")
+  if (verbose) message("\n[6/8] Broadcasting ancestry to variants...")
   anc_hap0_common <- msp$anc_hap0[common_samples, , drop = FALSE]
   anc_hap1_common <- msp$anc_hap1[common_samples, , drop = FALSE]
 
@@ -925,8 +890,10 @@ read_bed_file <- function(bed, bim = sub("\\.bed$", ".bim", bed),
 #'   \deqn{p = (1 - w)\, p_{raw} + w / 2.}
 #'   A variant carried only by ambiguous heterozygotes (\eqn{w = 1}) is
 #'   split 1/2 : 1/2. With K populations every pair is shrunk toward 1/2
-#'   in the same way. \code{mode = "haplotype"} is deterministic and
-#'   applies no shrinkage.
+#'   in the same way, with \eqn{w} computed from that pair's own evidence
+#'   (the unambiguous alleles on its two populations and its ambiguous
+#'   heterozygotes); see \code{\link{split_diploid_multi}}.
+#'   \code{mode = "haplotype"} is deterministic and applies no shrinkage.
 #'
 #' @return Invisibly, a list with one named numeric matrix (variants x
 #'   samples) per population (named after the MSP population codes, e.g.
@@ -962,7 +929,8 @@ ancestry_split <- function(vcf_path, msp_path, mode = c("dosage", "haplotype"),
   .check_string(chrom, null_ok = TRUE)
   .check_flag(verbose)
 
-  if (verbose) message("=== LANTERN Ancestry Split (Step 1, mode = ", mode, ") ===\n")
+  if (verbose) message("=== lantern::ancestry_split(), mode = \"", mode, "\" ===\n",
+                       .mode_description(mode), "\n")
 
   common    <- .parse_vcf_msp_common(vcf_path, msp_path, chrom = chrom, verbose = verbose)
   pop_codes <- common$pop_codes
@@ -976,23 +944,22 @@ ancestry_split <- function(vcf_path, msp_path, mode = c("dosage", "haplotype"),
   # Haplotype mode is deterministic. Dosage mode shrinks each ambiguous
   # pair's split toward 1/2 (a uniform 1/K target shared by all variants;
   # see the "Shrinkage toward 1/2" section).
-  if (verbose) message("\nStep 7: Splitting genotypes by ancestry (", mode, ")...")
+  if (verbose) .message_split_step(mode, pop_codes, codes, anc_diploid,
+                                    common$gt_hap0_mat + common$gt_hap1_mat)
   res <- if (mode == "haplotype") {
     split_haplotype_multi(common$gt_hap0_mat, common$gt_hap1_mat,
                           common$anc_hap0_var, common$anc_hap1_var,
                           pop_codes = pop_codes)
   } else {
     split_diploid_multi(common$gt_hap0_mat + common$gt_hap1_mat, anc_diploid,
-                        codes$pure, codes$mixed,
-                        gla = .uniform_shrink_target(names(pop_codes)),
-                        arm_id = integer(nrow(anc_diploid)))
+                        codes$pure, codes$mixed, shrink = TRUE)
   }
 
   # Per-variant pure-ancestry sample counts (feed Step 3's gene weights)
   ancestry_counts <- .pure_ancestry_counts(anc_diploid, codes$pure)
 
   # ---- Filter monomorphic variants ----
-  if (verbose) message("\nStep 8: Filtering monomorphic variants...")
+  if (verbose) message("\n[8/8] Filtering monomorphic variants...")
   has_alt <- rowSums(Reduce(`+`, res)) > 0
   n_mono  <- sum(!has_alt)
   if (n_mono > 0) {
@@ -1004,9 +971,16 @@ ancestry_split <- function(vcf_path, msp_path, mode = c("dosage", "haplotype"),
   if (nrow(variant_info) == 0) stop("All variants are monomorphic after filtering")
   rownames(variant_info) <- NULL
 
-  if (verbose) message("\n=== Step 1 Complete: ", nrow(variant_info), " variants, ",
-                       length(common$common_samples), " samples, ",
-                       length(pop_codes), " populations ===\n")
+  if (verbose) {
+    alt <- vapply(res, sum, numeric(1))
+    message("\n=== Done: ", nrow(variant_info), " variants x ",
+            length(common$common_samples), " samples, ", length(pop_codes),
+            " ancestries, mode = \"", mode, "\" ===")
+    message("  Alternate alleles per ancestry: ",
+            toString(sprintf("%s %s (%.1f%%)", names(alt),
+                             format(round(alt, 1), nsmall = 0, trim = TRUE),
+                             100 * alt / sum(alt))))
+  }
 
   invisible(c(res, list(
     variant_info    = variant_info,
@@ -1038,6 +1012,31 @@ ancestry_split <- function(vcf_path, msp_path, mode = c("dosage", "haplotype"),
                            pop2 = pop_names[pairs[2L, ]],
                            stringsAsFactors = FALSE),
        lookup = lookup)
+}
+
+# One-line description of a split mode for ancestry_split()'s log.
+.mode_description <- function(mode) {
+  if (mode == "dosage")
+    paste0("Unphased: an allele on a heterozygote with two different ",
+           "ancestries is shared between them,\nby proportions estimated ",
+           "from the variant's other carriers and shrunk toward 1/2.")
+  else
+    "Phased: each allele goes to the ancestry of the haplotype that carries it."
+}
+
+# Log for the split step: the ancestries and, in dosage mode, how many
+# genotypes are ambiguous (heterozygous with two different ancestries).
+.message_split_step <- function(mode, pop_codes, codes, anc_diploid, gt) {
+  message("\n[7/8] Splitting genotypes by ancestry (mode = \"", mode, "\")...")
+  message("  Ancestries: ", length(pop_codes), " (", toString(names(pop_codes)), ")",
+          if (mode == "dosage") c(", ", nrow(codes$mixed), " mixed pair",
+                                  if (nrow(codes$mixed) > 1) "s"))
+  if (mode == "dosage") {
+    amb <- anc_diploid > length(pop_codes) & gt == 1L
+    message("  Ambiguous heterozygotes: ", sum(amb, na.rm = TRUE),
+            " genotypes at ", sum(rowSums(amb, na.rm = TRUE) > 0),
+            " variants, split fractionally")
+  }
 }
 
 # Combine two haplotype ancestry matrices (MSP population codes) into one
@@ -1167,8 +1166,7 @@ ancestry_split_dosage <- function(gt_matrix = NULL, pt_matrix = NULL,
 
   # Same shrinkage toward 1/2 as ancestry_split()
   if (verbose) message("\nStep 4: Splitting genotypes by ancestry...")
-  result <- split_diploid(gt, anc, gla = .uniform_shrink_target(c("AFR", "EUR")),
-                          arm_id = integer(nrow(gt)))
+  result <- split_diploid(gt, anc, shrink = TRUE)
 
   if (verbose) message("\nStep 5: Counting ancestries per variant...")
   counts <- list(african  = count_ancestry_codes(anc, 3),
