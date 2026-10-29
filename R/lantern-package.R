@@ -1,3 +1,7 @@
+# SeqVarTools is imported only so that it installs with lantern:
+# GMMAT::SMMAT() reads the DS dosages in our GDS files with
+# SeqVarTools::imputedDosage(), but GMMAT only Suggests SeqVarTools.
+
 #' lantern: Ancestry-Specific Rare Variant Analysis
 #'
 #' R package for ancestry-specific rare variant association analysis
@@ -11,4 +15,5 @@
 #' @useDynLib lantern, .registration = TRUE
 #' @importFrom utils head combn
 #' @importFrom stats median pcauchy setNames
+#' @importFrom SeqVarTools imputedDosage
 "_PACKAGE"
