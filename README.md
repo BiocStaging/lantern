@@ -554,3 +554,11 @@ and plain C file I/O.
 ## License
 
 MIT
+
+## Use of AI tools
+
+Claude Code (Anthropic) was used as a coding assistant for parts of the
+package infrastructure (the SeqArray VCF reader, the tests, argument checks
+and refactoring), for drafts of the vignettes, and for the changes made in
+response to the Bioconductor review. The maintainer has reviewed all of the
+code, understands it, and will maintain it.

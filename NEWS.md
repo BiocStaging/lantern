@@ -64,7 +64,8 @@ change (paths relative to the package root; line numbers as of 0.99.1).
   infrastructure (the SeqArray VCF reader, the tests, argument checks and
   refactoring), for drafts of the vignettes, and for the changes in this
   revision. I have reviewed all of the code, understand it, and will
-  maintain it.
+  maintain it. The same statement is in the "Use of AI tools" section at
+  the end of the README. See `README.md:558`.
 * *Vignettes: were LLMs used to write the vignettes? They have an odd
   tone.* Yes, the earlier drafts were written with an LLM. I have rewritten
   all four vignettes in plainer language and edited them myself.
