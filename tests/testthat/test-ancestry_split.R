@@ -1135,8 +1135,7 @@ test_that("ancestry_split_dosage pairs exact names regardless of column order", 
   expect_identical(a$african, b$african)
   expect_identical(a$european, b$european)
   # and each variant uses its own column of pt
-  expect_equal(a$african, split_diploid(gt, t(pt), gla = matrix(.5, 1, 2),
-                                        arm_id = c(0L, 0L))$african)
+  expect_equal(a$african, split_diploid(gt, t(pt), shrink = TRUE)$african)
 })
 
 test_that("ancestry_split_dosage uses the first n entries of unnamed matrices of different sizes", {

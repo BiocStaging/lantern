@@ -20,10 +20,9 @@ test_that("split primitives validate matrix values and dimensions", {
   an <- matrix(c(3, 2, 1, 3), 2, 2)
   expect_error(split_diploid(gt + 1, an), "`gt_genotype` must only contain")
   expect_error(split_diploid(gt, an[, 1, drop = FALSE]), "same dimensions")
-  expect_error(split_diploid(gt, an, gla = matrix(.5, 1, 2)),
-               "must be supplied together")
-  expect_error(split_diploid(gt, an, gla = matrix(.5, 1, 2), arm_id = 0L),
-               "one 0-based row index into `gla` per variant")
+  expect_error(split_diploid(gt, an, shrink = NA), "`shrink` must be TRUE or FALSE")
+  expect_error(split_diploid_multi(gt, an, shrink = "yes"),
+               "`shrink` must be TRUE or FALSE")
   expect_error(split_diploid_multi(gt, an, pure_codes = c(3L, 1L)),
                "`pure_codes` must be a named vector")
   h <- matrix(c(0L, 1L, 1L, 0L), 2, 2)
@@ -63,8 +62,6 @@ test_that("write_dosage_gds validates its inputs", {
 })
 
 test_that("ancestry_smmat validates its inputs before fitting anything", {
-  skip_if_not_installed("GMMAT")
-  skip_if_not_installed("SeqVarTools")
   ext <- system.file("extdata", package = "lantern")
   ph  <- read.delim(file.path(ext, "toy_pheno.tsv"))
   K   <- diag(nrow(ph)); dimnames(K) <- list(ph$id, ph$id)

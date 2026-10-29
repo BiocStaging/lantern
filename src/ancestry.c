@@ -420,15 +420,6 @@ static SEXP split_by_ancestry_multi_c(SEXP gt, SEXP ancestry,
             }
         }
 
-        /* Allele-weighted confidence total for the GLA shrinkage weight
-           below: D already counts hom-alt carriers 2x vs. het (matching
-           the p[k] numerator above); each ambiguous mixed-het contributes
-           1 unresolved allele of confidence, same as N5 in the
-           2-population case (split_by_ancestry_c). */
-        double total_amb = 0.0;
-        for (int m = 0; m < M; m++) total_amb += amb[m];
-        double total_weighted = D + total_amb;
-
         /* -- Compute p[k] -- */
         if (D > 0.0)
             for (int p = 0; p < K; p++) pk[p] = num[p] / D;
@@ -473,14 +464,20 @@ static SEXP split_by_ancestry_multi_c(SEXP gt, SEXP ancestry,
                             out[pb][idx] = 0.5;
                         }
                     } else {
-                        /* GLA shrinkage: w is the fraction of alt-allele
-                           confidence (not carrier count) that is ambiguous
-                           for this specific pair -- hom-alt carriers count
-                           2x vs. het, matching total_weighted's derivation
-                           from D above. Raw pair ratio collapses to the GLA
-                           conditional fraction when this pair has no
-                           unambiguous hom-alt evidence of its own, so
-                           blending is well-defined even at w < 1. */
+                        /* Shrinkage toward the target (1/2 per pair in
+                           ancestry_split()). The pair's raw split uses
+                           only the unambiguous copies on its two
+                           ancestries, num[pa] and num[pb] (allele-weighted:
+                           hom-alt carriers count 2, a mixed hom-alt gives 1
+                           to each side), so w is the ambiguous share of
+                           exactly that evidence:
+                             w = amb[m] / (num[pa] + num[pb] + amb[m]).
+                           Copies on other ancestries, and other pairs'
+                           ambiguous carriers, say nothing about the pa-vs-pb
+                           split and are not counted. For K = 2 this is
+                           D + N5, as in split_by_ancestry_c. The raw split
+                           falls back to the target when the pair has no
+                           unambiguous copies (num[pa] + num[pb] = 0). */
                         double gla_pa = gla_ptr[arm + n_arms * pa];
                         double gla_pb = gla_ptr[arm + n_arms * pb];
                         double gla_sum = gla_pa + gla_pb;
@@ -489,7 +486,7 @@ static SEXP split_by_ancestry_multi_c(SEXP gt, SEXP ancestry,
                         double sum_ab = pk[pa] + pk[pb];
                         double pa_raw = (sum_ab > 0.0) ? pk[pa] / sum_ab : gla_frac_pa;
 
-                        double w = (double) amb[m] / total_weighted;
+                        double w = (double) amb[m] / (num[pa] + num[pb] + amb[m]);
                         double blended_pa = (1.0 - w) * pa_raw + w * gla_frac_pa;
                         out[pa][idx] = blended_pa;
                         out[pb][idx] = 1.0 - blended_pa;

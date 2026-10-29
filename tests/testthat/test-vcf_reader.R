@@ -105,3 +105,18 @@ test_that("bcftools and SeqArray readers give identical ancestry_split() output"
       info = mode)
   }
 })
+
+test_that("a bcftools error stops the read instead of returning the records before it", {
+  skip_if(!nzchar(Sys.which("bcftools")), "bcftools not on PATH")
+  vcf <- tempfile(fileext = ".vcf")
+  on.exit(unlink(vcf), add = TRUE)
+  # bcftools reads the first record, then exits non-zero at the bad POS
+  writeLines(c("##fileformat=VCFv4.2",
+               "##contig=<ID=chr1>",
+               "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">",
+               "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1",
+               "chr1\t100\t.\tA\tG\t.\tPASS\t.\tGT\t0|1",
+               "chr1\t1e+05\t.\tA\tG\t.\tPASS\t.\tGT\t0|1"), vcf)
+  expect_error(.vcf_read_gt(vcf, NULL, "bcftools", verbose = FALSE),
+               "bcftools query failed")
+})
