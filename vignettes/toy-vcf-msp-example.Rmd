@@ -15,7 +15,8 @@ library(lantern)
 ## Overview
 
 `ancestry_split()` takes two files: a phased VCF with the genotypes and an
-RFMix `.msp.tsv` file with the local ancestry. This vignette builds both
+[RFMix](https://github.com/slowkoni/rfmix) (Maples et al. 2013) `.msp.tsv`
+file with the local ancestry. This vignette builds both
 files by hand for a tiny example, small enough that every number in the
 output can be checked against the input. Part A uses two populations.
 Part B uses four, to show that nothing about the call changes when there
@@ -35,7 +36,7 @@ We write the files to a temporary directory. The VCF has three variants
 and three samples (S1, S2, S3). The genotypes are phased: in `0|1` the
 first number is the allele on the first copy of the chromosome
 (haplotype 0) and the second number the allele on the second copy
-(haplotype 1).
+(haplotype 1) per VCF file standard.
 
 ```{r toy-vcf}
 tmp_dir  <- tempfile()
@@ -238,6 +239,13 @@ haplotypes, and the other two populations get 0.
 ```{r cleanup, include = FALSE}
 unlink(tmp_dir, recursive = TRUE)
 ```
+
+## References
+
+Maples BK, Gravel S, Kenny EE, Bustamante CD (2013). RFMix: a
+discriminative modeling approach for rapid and robust local-ancestry
+inference. *American Journal of Human Genetics* 93(2):278--288. doi:
+[10.1016/j.ajhg.2013.06.020](https://doi.org/10.1016/j.ajhg.2013.06.020).
 
 ## Session information
 

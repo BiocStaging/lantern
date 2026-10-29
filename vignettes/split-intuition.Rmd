@@ -22,12 +22,48 @@ one dosage per ancestral population. There are two ways to do this:
 | Phased (`"haplotype"`) | the allele and the ancestry of each haplotype | to the population of the haplotype that carries it |
 | Unphased (`"dosage"`) | the genotype (0/1/2) and the pair of ancestries at the site | shared by estimated proportions when the genotype is ambiguous |
 
-This vignette explains both on small matrices, without any files, using
-the low-level functions that `ancestry_split()` calls internally. Part A
-covers two populations, Part B any number of populations, and Part C the
-shrinkage that `ancestry_split()` applies to unphased splits.
-`vignette("toy-vcf-msp-example")` shows the same splits starting from VCF
-and MSP files.
+## How the functions fit together
+
+Most analyses only need `ancestry_split()`, which reads a VCF and an MSP
+file and returns the split dosages. Underneath it are four matrix-level
+functions, exported so you can split matrices you already have in memory,
+or see exactly what the split does, as this vignette does:
+
+|                          | Unphased                | Phased                    |
+|--------------------------|-------------------------|---------------------------|
+| Any number of populations | `split_diploid_multi()` | `split_haplotype_multi()` |
+| Two populations only     | `split_diploid()`       | `split_haplotype()`       |
+
+* `ancestry_split(mode = "dosage")` calls `split_diploid_multi()`, and
+  `ancestry_split(mode = "haplotype")` calls `split_haplotype_multi()`.
+  It does so for any number of populations, including two.
+* `split_diploid()` and `split_haplotype()` are two-population shortcuts
+  with fixed AFR/EUR codes that return `african` and `european` matrices.
+  With two populations they give the same results as the `_multi`
+  versions (checked in Part B). `ancestry_split()` does not use them.
+
+The unphased and phased functions take different inputs, all of them
+variants x samples matrices:
+
+|          | Unphased functions | Phased functions |
+|----------|--------------------|------------------|
+| Genotype | one matrix of 0/1/2 alternate-allele counts | two matrices of 0/1, one per haplotype |
+| Ancestry | one matrix of codes for each sample's pair of ancestries, e.g. AFR/EUR | two matrices of population codes, one per haplotype, as in the MSP file |
+
+`ancestry_split()` builds both from the VCF and MSP files. For the
+unphased split it adds the two haplotypes to get the genotype and combines
+the two haplotype ancestries into a pair code, so you never choose codes
+yourself.
+
+One more difference: `ancestry_split(mode = "dosage")` always shrinks the
+unphased split toward 1/2 (Part C). The unphased functions shrink only
+with `shrink = TRUE`. Parts A and B use the default `shrink = FALSE` to
+show the plain estimate, so their numbers differ slightly from what
+`ancestry_split()` would give on the same data.
+
+Part A covers two populations, Part B any number of populations, and
+Part C the shrinkage. `vignette("toy-vcf-msp-example")` shows the same
+splits starting from VCF and MSP files.
 
 ***
 
@@ -36,11 +72,14 @@ and MSP files.
 ## A.1 Unphased split with `split_diploid()`
 
 Without phase we only know, for each sample at a variant, its genotype (0,
-1 or 2 alternate alleles) and its pair of ancestries, coded as
+1 or 2 alternate alleles) and its pair of ancestries. `split_diploid()`
+expects these codes:
 
 * 1 = EUR/EUR (both haplotypes European),
 * 2 = AFR/EUR (one of each),
 * 3 = AFR/AFR.
+
+(`split_diploid_multi()` lets you choose the codes; see B.1.)
 
 For most samples the split is obvious. An AFR/AFR sample's alleles are all
 African, and an AFR/EUR sample with genotype 2 has one allele on each
@@ -53,13 +92,13 @@ which haplotype carries it. The full rule:
 | AFR/AFR  | 2 | 2 | 0 |
 | AFR/AFR  | 1 | 1 | 0 |
 | AFR/EUR  | 2 | 1 | 1 |
-| **AFR/EUR** | **1** | **\(p_\text{AFR}\)** | **\(p_\text{EUR}\)** |
+| **AFR/EUR** | **1** | **\(P_\text{AFR}\)** | **\(P_\text{EUR}\)** |
 | EUR/EUR  | 2 | 0 | 2 |
 | EUR/EUR  | 1 | 0 | 1 |
 
 Genotype 0 contributes nothing to either dosage. Only the highlighted row
-needs the proportions \(p_\text{AFR}\) and \(p_\text{EUR} = 1 -
-p_\text{AFR}\), which are estimated from the other rows as shown below.
+needs the proportions \(P_\text{AFR}\) and \(P_\text{EUR} = 1 -
+P_\text{AFR}\), which are estimated from the other rows as shown below.
 
 Consider a single variant in six samples:
 
@@ -75,33 +114,35 @@ S1 and S2 are AFR/AFR carriers, S3 is a EUR/EUR carrier, S6 is an AFR/EUR
 homozygote and S4 is the one ambiguous AFR/EUR heterozygote. To split S4's
 allele we estimate how this variant's alternate alleles divide between
 African and European haplotypes, using only the unambiguous carriers.
-Writing \(N\) for the number of samples of a given ancestry and genotype,
+Write \(N_{kk}^{(g)}\) for the number of samples with ancestry \(k/k\) and
+genotype \(g\), and \(N_{\text{AFR,EUR}}^{(g)}\) for those with ancestry
+AFR/EUR. The unambiguous alternate alleles on each ancestry number
 
 \[
-p_\text{AFR} = \frac{2N_\text{AFR/AFR, 2} + N_\text{AFR/AFR, 1} + N_\text{AFR/EUR, 2}}{D},
+n_\text{AFR} = 2N_\text{AFR,AFR}^{(2)} + N_\text{AFR,AFR}^{(1)} + N_\text{AFR,EUR}^{(2)},
 \qquad
-p_\text{EUR} = \frac{N_\text{AFR/EUR, 2} + 2N_\text{EUR/EUR, 2} + N_\text{EUR/EUR, 1}}{D},
+n_\text{EUR} = 2N_\text{EUR,EUR}^{(2)} + N_\text{EUR,EUR}^{(1)} + N_\text{AFR,EUR}^{(2)},
 \]
 
-where \(D\) is the number of unambiguous alternate alleles, that is, all
-alternate alleles at the variant minus those of the ambiguous
-heterozygotes:
+since an AFR/EUR homozygote contributes one allele to each ancestry. Their
+total \(D = n_\text{AFR} + n_\text{EUR}\) is all alternate alleles at the
+variant minus those of the ambiguous heterozygotes, and the proportions
+are
 
 \[
-D = 2N_\text{AFR/AFR, 2} + N_\text{AFR/AFR, 1} + 2N_\text{AFR/EUR, 2}
-  + 2N_\text{EUR/EUR, 2} + N_\text{EUR/EUR, 1}.
+P_\text{AFR} = \frac{n_\text{AFR}}{D}, \qquad
+P_\text{EUR} = \frac{n_\text{EUR}}{D}.
 \]
 
-An AFR/EUR homozygote contributes one allele to each population. The
-ambiguous heterozygote then gets \(p_\text{AFR}\) of its allele as African
-dosage and \(p_\text{EUR}\) as European dosage. For our variant:
+The ambiguous heterozygote then gets \(P_\text{AFR}\) of its allele as
+African dosage and \(P_\text{EUR}\) as European dosage. For our variant:
 
 ```{r a1-by-hand}
-n <- function(a, g) sum(anc == a & gt == g)
-D <- 2 * n(3, 2) + n(3, 1) + 2 * n(2, 2) + 2 * n(1, 2) + n(1, 1)
-p_afr <- (2 * n(3, 2) + n(3, 1) + n(2, 2)) / D
-p_eur <- (n(2, 2) + 2 * n(1, 2) + n(1, 1)) / D
-c(D = D, p_AFR = p_afr, p_EUR = p_eur)
+N <- function(a, g) sum(anc == a & gt == g)   # codes: 3 = AFR/AFR, 2 = AFR/EUR, 1 = EUR/EUR
+n_afr <- 2 * N(3, 2) + N(3, 1) + N(2, 2)
+n_eur <- 2 * N(1, 2) + N(1, 1) + N(2, 2)
+D <- n_afr + n_eur
+c(n_AFR = n_afr, n_EUR = n_eur, D = D, P_AFR = n_afr / D, P_EUR = n_eur / D)
 ```
 
 `split_diploid()` returns the two dosage matrices. S4's allele is split
@@ -133,8 +174,8 @@ With phased genotypes and local ancestry for each haplotype, nothing needs
 to be estimated: each haplotype's allele goes to that haplotype's
 population. `split_haplotype()` takes four matrices of the same shape
 (variants x samples): the alleles (0/1) on haplotype 0 and on haplotype 1,
-and the ancestry of each haplotype, with RFMix's codes 0 = AFR and
-1 = EUR.
+and the ancestry of each haplotype, by default with RFMix's codes 0 = AFR
+and 1 = EUR (set `pop_codes` if your MSP file numbers them differently).
 
 ```{r a2-data}
 ids <- list(paste0("var", 1:3), paste0("S", 1:3))
@@ -165,8 +206,10 @@ all.equal(phased$african + phased$european, unname(gt0 + gt1))
 # Part B: More than two populations
 
 `split_diploid_multi()` and `split_haplotype_multi()` do the same for any
-number of populations K. With two populations they give the same results
-as the functions in Part A.
+number of populations K. They are the functions `ancestry_split()` calls.
+With two populations they give the same results as the functions in
+Part A; the only difference is that their results are named by population
+(`AFR`, `EUR`, ...) rather than `african` and `european`.
 
 ## B.1 Unphased split with `split_diploid_multi()`
 
@@ -210,42 +253,59 @@ names(out)
 
 The estimate works as in A.1, with one proportion per population. Pure
 carriers count for their population and mixed homozygotes contribute one
-allele to each of their two populations. With \(N_{k,g}\) the number of
-pure population-\(k\) samples with genotype \(g\), and \(N_{\{k,j\},2}\)
-the number of mixed \(k\)/\(j\) homozygotes,
+allele to each of their two populations. For a variant, let
+\(N_{kk}^{(g)}\) count carriers with homozygous local ancestry \(k/k\) and
+alternate-allele dosage \(g\), and \(N_{ij}^{(g)} = N_{ji}^{(g)}\) those
+with heterozygous local ancestry \(i/j\), \(i \ne j\). The number of
+unambiguous alternate alleles on ancestry \(k\) is
 
 \[
-p_k = \frac{2N_{k,2} + N_{k,1} + \sum_{j \ne k} N_{\{k,j\},2}}{D},
-\qquad
-D = \sum_k \left(2N_{k,2} + N_{k,1}\right) + 2\sum_{k<j} N_{\{k,j\},2},
+n_k = 2N_{kk}^{(2)} + N_{kk}^{(1)} + \sum_{i < j:\; k \in \{i,j\}} N_{ij}^{(2)},
 \]
 
-so the \(p_k\) add up to 1. An ambiguous heterozygote with ancestries
-\(i\) and \(j\) then gets \(p_i / (p_i + p_j)\) of its allele in
-population \(i\) and \(p_j / (p_i + p_j)\) in population \(j\).
+and their total \(D = \sum_k n_k\) is the \(D\) of A.1. An ambiguous
+carrier with local ancestry \(i/j\) is split within its own pair. Without
+shrinkage (Part C) it gets
+
+\[
+\tilde{\pi}_{ij} = \frac{n_i}{n_i + n_j}
+\]
+
+of its allele in ancestry \(i\) and \(1 - \tilde{\pi}_{ij}\) in ancestry
+\(j\).
 
 To check this, we take the first variant with an ambiguous AFR/EUR
-heterozygote and compute the proportions by hand:
+heterozygote and count the unambiguous alleles by hand:
 
 ```{r b1-by-hand}
 v <- which(rowSums(anc3 == 2 & gt3 == 1) > 0)[1]
 g <- gt3[v, ]
 a <- anc3[v, ]
-n <- function(code, genotype) sum(a == code & g == genotype)
-num <- c(AFR = 2 * n(3, 2) + n(3, 1) + n(2, 2) + n(5, 2),
-         EUR = 2 * n(1, 2) + n(1, 1) + n(2, 2) + n(6, 2),
-         NAT = 2 * n(4, 2) + n(4, 1) + n(5, 2) + n(6, 2))
-p <- num / sum(num)   # sum(num) equals D
-p
+N <- function(code, genotype) sum(a == code & g == genotype)
+# codes: 3 = AFR/AFR, 1 = EUR/EUR, 4 = NAT/NAT, 2 = AFR/EUR, 5 = AFR/NAT, 6 = EUR/NAT
+n_k <- c(AFR = 2 * N(3, 2) + N(3, 1) + N(2, 2) + N(5, 2),
+         EUR = 2 * N(1, 2) + N(1, 1) + N(2, 2) + N(6, 2),
+         NAT = 2 * N(4, 2) + N(4, 1) + N(5, 2) + N(6, 2))
+n_k
 ```
 
-The heterozygote's African share should be \(p_\text{AFR} / (p_\text{AFR}
-+ p_\text{EUR})\), which matches the function's output:
+The heterozygote's African share should be \(\tilde{\pi}_\text{AFR,EUR} =
+n_\text{AFR} / (n_\text{AFR} + n_\text{EUR})\), which matches the
+function's output:
 
 ```{r b1-check}
 s <- which(a == 2 & g == 1)[1]
-c(by_hand  = unname(p["AFR"] / (p["AFR"] + p["EUR"])),
+c(by_hand  = unname(n_k["AFR"] / (n_k["AFR"] + n_k["EUR"])),
   lantern  = out$AFR[v, s])
+```
+
+With its default codes, which are the two-population codes of A.1,
+`split_diploid_multi()` gives the same split as `split_diploid()` on the
+variant from A.1:
+
+```{r b1-equivalent}
+d2 <- split_diploid_multi(gt, anc)
+all.equal(unname(d2$AFR), unname(res$african))
 ```
 
 ## B.2 Phased split with `split_haplotype_multi()`
@@ -316,23 +376,37 @@ c(AFR = sum(raw$AFR), EUR = sum(raw$EUR), NAT = sum(raw$NAT))
 ```
 
 The only unambiguous carrier is European, so the estimate is
-\(p_\text{EUR} = 1\), and all ten ambiguous alleles are assigned to
+\(P_\text{EUR} = 1\), and all ten ambiguous alleles are assigned to
 European haplotypes on the strength of one sample.
 
-`ancestry_split()` therefore pulls the estimated share toward 1/2. How
-far depends on \(w\), the fraction of the variant's alternate alleles
-that are ambiguous (homozygotes count twice, as they carry two alleles).
-For an ambiguous heterozygote with ancestries \(i\) and \(j\),
+`ancestry_split()` therefore pulls the raw split \(\tilde{\pi}_{ij}\)
+toward 1/2. How far depends on \(w_{ij}\), the share of the evidence about
+the pair that is ambiguous. Only the alleles on ancestries \(i\) and \(j\)
+(\(n_i\) and \(n_j\) from B.1), and the pair's own ambiguous carriers,
+contribute to that split. So the raw split and the pair's ambiguous share
+are
 
 \[
-\text{share}_i = (1 - w)\,\frac{p_i}{p_i + p_j} + w \cdot \frac{1}{2}.
+\tilde{\pi}_{ij} = \frac{n_i}{n_i + n_j}, \qquad
+w_{ij} = \frac{N_{ij}^{(1)}}{n_i + n_j + N_{ij}^{(1)}},
 \]
 
-When most of the evidence is unambiguous, \(w\) is close to 0 and the
-estimate from A.1 or B.1 is used almost unchanged. When there is no
-unambiguous evidence, \(w = 1\) and the allele is split exactly 1/2 and
-1/2, the same as the fallback in A.1. The shares stay within the pair, so
-an AFR/EUR heterozygote never gets Native American dosage.
+and the shrunk split is
+
+\[
+\pi_{ij} = (1 - w_{ij})\,\tilde{\pi}_{ij} + 1/2\; w_{ij}
+  = \frac{n_i + 1/2\, N_{ij}^{(1)}}{n_i + n_j + N_{ij}^{(1)}},
+\]
+
+i.e. each ambiguous carrier counts as half an allele on each of its two
+ancestries. When the pair has no unambiguous allele (\(n_i + n_j = 0\),
+including \(D = 0\)), \(w_{ij} = 1\) and \(\pi_{ij} = 1/2\), the
+same as the fallback in A.1. Alleles on other ancestries, and other pairs'
+ambiguous carriers, do not enter \(w_{ij}\). The carrier gets
+\(x_i = \pi_{ij}\) and \(x_j = 1 - \pi_{ij}\), and 0 for
+every other ancestry. When most of the pair's evidence is unambiguous,
+\(w_{ij}\) is close to 0 and \(\tilde{\pi}_{ij}\) is used almost
+unchanged.
 
 The target is 1/2 because an AFR/EUR heterozygote has exactly one African
 and one European haplotype at the site. Which of the two carries the
@@ -343,39 +417,51 @@ earlier version of lantern shrank toward the cohort's average ancestry
 that data, ambiguous alleles were in fact on the African haplotype half of
 the time, and shrinking toward 1/2 assigned them more accurately.
 
-The low-level functions take the target through their `gla` argument (one
-row of target proportions) and `arm_id` (which row each variant uses). A
-target of 1/K for each of K populations gives 1/2 for every pair, which is
-what `ancestry_split()` uses:
+`split_diploid()` and `split_diploid_multi()` apply the same shrinkage
+with `shrink = TRUE`:
 
 ```{r c-shrink}
-half <- matrix(1/3, nrow = 1, ncol = 3,
-               dimnames = list("all", c("AFR", "EUR", "NAT")))
 shrunk <- split_diploid_multi(gt_dom, anc_dom, pure_codes, mixed_codes,
-                              gla = half, arm_id = 0L)
+                              shrink = TRUE)
 rbind(raw    = c(AFR = sum(raw$AFR), EUR = sum(raw$EUR)),
       shrunk = c(AFR = sum(shrunk$AFR), EUR = sum(shrunk$EUR)))
 ```
 
-Here 10 of the variant's 12 alternate alleles are ambiguous, so
-\(w = 10/12\). Each heterozygote's African share becomes
-\((2/12) \cdot 0 + (10/12) \cdot (1/2) = 5/12 \approx 0.42\) instead of 0:
+Here the pair's evidence is the EUR/EUR homozygote's two alleles
+(\(n_\text{AFR} = 0\), \(n_\text{EUR} = 2\)) and the ten ambiguous
+heterozygotes, so \(w_\text{AFR,EUR} = 10/(0 + 2 + 10) = 10/12\). Each
+heterozygote's African share becomes
+\(\pi_\text{AFR,EUR} = (0 + 10/2) / 12 = 5/12 \approx 0.42\)
+instead of 0:
 
 ```{r c-share}
 shrunk$AFR[1, 1]
 ```
 
-The variant from A.1 has much more unambiguous evidence: one ambiguous
-allele out of seven, so \(w = 1/7\), and S4's African share moves only
-slightly, from 2/3 to \((6/7)(2/3) + (1/7)(1/2) = 9/14 \approx 0.64\):
+Adding a hundred Native American carriers changes nothing, because they
+do not enter \(w_\text{AFR,EUR}\):
+
+```{r c-other-pop}
+gt_nat  <- cbind(gt_dom, matrix(1L, nrow = 1, ncol = 100))
+anc_nat <- cbind(anc_dom, matrix(pure_codes[["NAT"]], nrow = 1, ncol = 100))
+split_diploid_multi(gt_nat, anc_nat, pure_codes, mixed_codes,
+                    shrink = TRUE)$AFR[1, 1]
+```
+
+The variant from A.1 has much more unambiguous evidence: \(n_\text{AFR} =
+4\) (S1, S2's two alleles, and one from S6), \(n_\text{EUR} = 2\) (S3 and
+one from S6) and one ambiguous heterozygote, so \(w_\text{AFR,EUR} =
+1/(4 + 2 + 1) = 1/7\). S4's African share moves only slightly, from
+\(\tilde{\pi}_\text{AFR,EUR} = 2/3\) to \(\pi_\text{AFR,EUR} =
+(4 + 1/2) / 7 = 9/14 \approx 0.64\):
 
 ```{r c-a1}
 # S4 is the 4th sample
-split_diploid(gt, anc, gla = matrix(0.5, nrow = 1, ncol = 2), arm_id = 0L)$african[1, 4]
+split_diploid(gt, anc, shrink = TRUE)$african[1, 4]
 ```
 
-You do not need to set the target yourself: `ancestry_split(mode =
-"dosage")` always applies it.
+You do not need to set this yourself: `ancestry_split(mode = "dosage")`
+always shrinks.
 
 ## Session information
 
