@@ -13,31 +13,42 @@ vignette: >
 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
-has_gmmat <- requireNamespace("GMMAT", quietly = TRUE) &&
-  requireNamespace("SeqVarTools", quietly = TRUE)
 ```
 
 # Introduction
 
-People with recent ancestry from more than one population, such as African
-Americans, are called admixed. Along each of their chromosomes, some
+People with ancestry from more than one population, such as African
+Americans, European, are called admixed. In each of their chromosomes, some
 segments were inherited from African ancestors and others from European
-ancestors. Software such as RFMix can infer, for every segment and each of
-the two copies of a chromosome, which population it came from. This is
-called local ancestry.
+ancestors. Software such as [RFMix](https://github.com/slowkoni/rfmix)
+(Maples et al. 2013) can infer, for every segment in each of the two copies of a chromosome,
+which population it came from. This is so called local ancestry.
 
-Rare-variant association tests usually group the rare variants in a gene
-and test whether carrying them is associated with a trait. If a variant's
-effect depends on the genetic background it sits on, for example because
-it is tagged by different nearby variants in African and European
-haplotypes, pooling all carriers mixes carriers with and without the
-effect, and the test loses power.
+Admixed people are often left out of genetic association studies, or
+analysed as if their whole genome came from one population. Yet the same
+allele can relate to a trait differently depending on the ancestral
+background it sits on. Linkage disequilibrium differs between
+populations, so a variant may tag a nearby causal variant on African
+haplotypes but not on European ones. Allele frequencies differ, so a
+variant can be common on one background and almost absent on the other.
+And an allele's effect can depend on the other variants carried on the
+same haplotype. Tractor (Atkinson et al. 2021) uses local ancestry to
+estimate a separate effect for each ancestry in genome-wide association
+studies of common variants, and showed that this gives accurate
+ancestry-specific effect sizes, boosts power, and places association
+signals closer to the causal variants.
 
-lantern uses local ancestry to split each person's count of alternate
-alleles (their dosage, 0, 1 or 2) into one dosage per ancestry. A
-heterozygote whose allele sits on an African haplotype contributes 1 to
-the African dosage and 0 to the European dosage. lantern then runs the
-gene-based SMMAT test from the GMMAT package separately for each ancestry,
+Rare-variant association tests have the same problem. The rare
+variants in a gene are grouped and tested whether carrying them is associated with a
+trait. If the variants act on African haplotypes but not on European ones
+(or the reverse), pooling all carriers mixes carriers with and without the
+effect, the signal is diluted, and the test loses power.
+
+To bridge the gap, lantern aims to use local ancestry to split each
+person's count of alternate alleles (their dosage, 0, 1 or 2) into one dosage
+per ancestry. A heterozygote whose allele sits on an African haplotype contributes
+1 to the African dosage and 0 to the European dosage. lantern then runs the
+gene-based SMMAT test from the `r CRANpkg("GMMAT")` package separately for each ancestry,
 and combines the per-ancestry p-values for each gene into one p-value with
 the Cauchy combination test.
 
@@ -86,7 +97,7 @@ ancestry tracts to enhance rare-variant aggregate association testing.
 
 ## Workflow
 
-The analysis has three steps, one function each:
+The analysis has three steps as follows:
 
 1. `ancestry_split()` reads a phased VCF and an RFMix local-ancestry file
    and returns one dosage matrix per ancestry.
@@ -101,13 +112,6 @@ The analysis has three steps, one function each:
 if (!requireNamespace("BiocManager", quietly = TRUE))
     install.packages("BiocManager")
 BiocManager::install("lantern")
-```
-
-Step 3 also needs GMMAT (from CRAN) and SeqVarTools (from Bioconductor):
-
-```{r install-suggests, eval = FALSE}
-install.packages("GMMAT")
-BiocManager::install("SeqVarTools")
 ```
 
 ```{r load}
@@ -237,7 +241,7 @@ each ancestry. Passing `ancestry_counts` and `variant_info` from Step 1
 weights the Cauchy combination by how many samples of each ancestry carry
 a gene's variants, so the ancestry with more data counts for more.
 
-```{r smmat, eval = has_gmmat}
+```{r smmat}
 res <- ancestry_smmat(gds, pheno, y ~ age + sex, kinship,
                       gene_group_file = file.path(ext, "toy_genes.tsv"),
                       ancestry_counts = split$ancestry_counts,
@@ -250,7 +254,7 @@ The table has one row per gene: `p_AFR` and `p_EUR` are the SMMAT p-values
 from each ancestry, `w_AFR` and `w_EUR` the weights, and `p_cauchy` the
 combined p-value. `GENE2` stands out:
 
-```{r gene2, eval = has_gmmat}
+```{r gene2}
 res$results[res$results$gene == "GENE2", ]
 ```
 
@@ -259,7 +263,7 @@ is not, and the combined p-value keeps the signal. For comparison, we test
 the same genes without splitting by ancestry. Adding the two dosage
 matrices gives back each sample's total dosage:
 
-```{r pooled, eval = has_gmmat}
+```{r pooled}
 pooled_gds <- file.path(out_dir, "pooled.gds")
 write_dosage_gds(split$AFR + split$EUR, split$variant_info,
                  split$sample_ids, pooled_gds)
@@ -285,6 +289,20 @@ unlink(out_dir, recursive = TRUE)
   detail, including a four-population example.
 - `vignette("real-data-chr19")` analyses chromosome 19 in a real cohort
   with binary, continuous and count traits.
+
+# References
+
+Atkinson EG, Maihofer AX, Kanai M, Martin AR, Karczewski KJ, Santoro ML,
+Ulirsch JC, Kamatani Y, Okada Y, Finucane HK, Koenen KC, Nievergelt CM,
+Daly MJ, Neale BM (2021). Tractor uses local ancestry to enable the
+inclusion of admixed individuals in GWAS and to boost power. *Nature
+Genetics* 53(2):195--204. doi:
+[10.1038/s41588-020-00766-y](https://doi.org/10.1038/s41588-020-00766-y).
+
+Maples BK, Gravel S, Kenny EE, Bustamante CD (2013). RFMix: a
+discriminative modeling approach for rapid and robust local-ancestry
+inference. *American Journal of Human Genetics* 93(2):278--288. doi:
+[10.1016/j.ajhg.2013.06.020](https://doi.org/10.1016/j.ajhg.2013.06.020).
 
 # Session information
 
