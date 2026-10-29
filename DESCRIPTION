@@ -35,15 +35,15 @@ Depends:
     R (>= 4.5.0)
 Imports:
     data.table,
+    GMMAT,
     SeqArray,
+    SeqVarTools,
     stats,
     utils
 Suggests:
     BiocStyle,
-    GMMAT,
     knitr,
     rmarkdown,
-    SeqVarTools,
     testthat (>= 3.0.0)
 VignetteBuilder: knitr
 biocViews: Software, Genetics, GenomeWideAssociation, SNP, VariantAnnotation
